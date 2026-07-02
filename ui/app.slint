@@ -1,0 +1,150 @@
+import { Button, LineEdit } from "std-widgets.slint";
+
+component FormField inherits VerticalLayout {
+    in property placeholder-text <=> input.placeholder-text;
+    in property input-type <=> input.input-type;
+    out property text <=> input.text;
+
+    in-out property <string> error: "";
+    callback validate(string) -> string;
+
+    alignment: center;
+
+    input := LineEdit {
+        height: 65%;
+        edited(text) => {
+            error = validate(text);
+        }
+    }
+
+    Text {
+        height: 35%;
+        text: error;
+    }
+}
+
+export component App inherits Window {
+    property <string> view: "menu";
+    property <string> server-port: "8082";
+
+    pure callback is-port(s: string) -> bool;
+    callback start-server(port: string) -> string;
+    callback start-client(server-address: string) -> string;
+
+    if view == "menu": HorizontalLayout {
+        alignment: center;
+
+        server-form := VerticalLayout {
+            property <string> error: "";
+
+            alignment: center;
+            width: 40%;
+            spacing: 5px;
+
+            port-field := FormField {
+                height: 7%;
+                placeholder-text: "Enter port (default 8082)";
+                input-type: number;
+                validate(text) => {
+                    server-port = text == "" ? "8082" : text;
+                    return is-port(server-port) ? "" : "Invalid port";
+                }
+            }
+
+            Button {
+                text: "Start Server";
+                height: 5%;
+                clicked => {
+                    debug("Pressed Start Server");
+                    port-field.error = start-server(server-port);
+                    if (port-field.error == "") {
+                        root.view = "server";
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            width: 7%;
+        }
+
+        client-form := VerticalLayout {
+            alignment: center;
+            width: 40%;
+            spacing: 5px;
+
+            address-field := FormField {
+                height: 7%;
+                width: 50%;
+                placeholder-text: "Enter server address (e.g. 192.168.1.1:8082)";
+                validate(text) => "";
+            }
+
+            Button {
+                height: 5%;
+                text: "Start Client";
+                clicked => {
+                    debug("Pressed Start Client");
+                    address-field.error = start-client(address-field.text);
+                    if (address-field.error == "") {
+                        root.view = "client";
+                    }
+                }
+            }
+        }
+    }
+    callback keyboard-input(key: string, action: string);
+    callback escape();
+    forward-focus: scope;
+
+    scope := FocusScope {
+        KeyBinding {
+            keys: @keys(Escape);
+            activated => {
+                debug("Escape Pressed");
+                escape();
+                root.view = "menu";
+            }
+        }
+
+        key-pressed(event) => {
+            if (view == "client" && !event.modifiers.meta && !event.modifiers.alt && event.text != "") {
+                root.keyboard-input(event.text, "pressed");
+            }
+            accept
+        }
+        key-released(event) => {
+            if (view == "client" && !event.modifiers.meta && !event.modifiers.alt && event.text != "") {
+                root.keyboard-input(event.text, "released");
+            }
+            accept
+        }
+    }
+
+    in property <bool> connected-to-server: false;
+    in property <string> public-address;
+
+    if view == "server": VerticalLayout {
+        VerticalLayout {
+            height: 10%;
+
+            Text {
+                text: "Server";
+            }
+
+            Text {
+                text: "Address: " + public-address + ":" + server-port;
+            }
+
+            if (!connected-to-server): Text {
+                text: "Waiting for client connection...";
+            }
+        }
+    }
+
+    if view == "client": VerticalLayout {
+        Text {
+            text: "Client";
+        }
+    }
+}

@@ -2,7 +2,16 @@
 name = "remin"
 version = "0.1.0"
 edition = "2024"
+build = "build.rs"
+
+[build-dependencies]
+slint-build = "1.17.0"
 
 [dependencies]
+anyhow = "1.0.103"
 enigo = { version = "0.6.1", features = ["wayland"] }
+log = "0.4.33"
+pretty_env_logger = "0.5.0"
+public-ip-address = "0.4.0"
 slint = "1.17.0"
+tokio = { version = "1.52.3", features = ["full"] }
