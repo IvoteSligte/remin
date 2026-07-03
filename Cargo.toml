@@ -10,8 +10,7 @@ slint-build = "1.17.0"
 [dependencies]
 anyhow = "1.0.103"
 enigo = { version = "0.6.1", features = ["wayland"] }
+ffmpeg-sidecar = "2.5.2"
 log = "0.4.33"
 pretty_env_logger = "0.5.0"
-public-ip-address = "0.4.0"
 slint = "1.17.0"
-tokio = { version = "1.52.3", features = ["full"] }

@@ -25,42 +25,36 @@ component FormField inherits VerticalLayout {
 
 export component App inherits Window {
     property <string> view: "menu";
-    property <string> server-port: "8082";
+    in property <image> video-frame <=> video-display.source;
 
     pure callback is-port(s: string) -> bool;
-    callback start-server(port: string) -> string;
-    callback start-client(server-address: string) -> string;
+    callback start-server() -> string;
+    callback start-client(server-ip: string) -> string;
 
     if view == "menu": HorizontalLayout {
         alignment: center;
 
         server-form := VerticalLayout {
-            property <string> error: "";
+            private property <string> error: "";
 
             alignment: center;
             width: 40%;
             spacing: 5px;
-
-            port-field := FormField {
-                height: 7%;
-                placeholder-text: "Enter port (default 8082)";
-                input-type: number;
-                validate(text) => {
-                    server-port = text == "" ? "8082" : text;
-                    return is-port(server-port) ? "" : "Invalid port";
-                }
-            }
 
             Button {
                 text: "Start Server";
                 height: 5%;
                 clicked => {
                     debug("Pressed Start Server");
-                    port-field.error = start-server(server-port);
-                    if (port-field.error == "") {
+                    error = start-server();
+                    if (error == "") {
                         root.view = "server";
                     }
                 }
+            }
+
+            if (error != ""): Text {
+                text: error;
             }
         }
 
@@ -69,14 +63,16 @@ export component App inherits Window {
         }
 
         client-form := VerticalLayout {
+            private property <string> error: "";
+
             alignment: center;
             width: 40%;
             spacing: 5px;
 
-            address-field := FormField {
+            server-ip-field := FormField {
                 height: 7%;
                 width: 50%;
-                placeholder-text: "Enter server address (e.g. 192.168.1.1:8082)";
+                placeholder-text: "Enter server IP (e.g. 192.168.1.1)";
                 validate(text) => "";
             }
 
@@ -85,11 +81,15 @@ export component App inherits Window {
                 text: "Start Client";
                 clicked => {
                     debug("Pressed Start Client");
-                    address-field.error = start-client(address-field.text);
-                    if (address-field.error == "") {
+                    error = start-client(server-ip-field.text);
+                    if (error == "") {
                         root.view = "client";
                     }
                 }
+            }
+
+            if (error != ""): Text {
+                text: error;
             }
         }
     }
@@ -121,8 +121,7 @@ export component App inherits Window {
         }
     }
 
-    in property <bool> connected-to-server: false;
-    in property <string> public-address;
+    in property <bool> client-connected: false;
 
     if view == "server": VerticalLayout {
         VerticalLayout {
@@ -133,16 +132,13 @@ export component App inherits Window {
             }
 
             Text {
-                text: "Address: " + public-address + ":" + server-port;
-            }
-
-            if (!connected-to-server): Text {
-                text: "Waiting for client connection...";
+                text: client-connected ? "Client connected." : "Waiting for client connection...";
             }
         }
     }
 
-    if view == "client": VerticalLayout {
+    video-display := Image {
+        visible: view == "client";
         Text {
             text: "Client";
         }
