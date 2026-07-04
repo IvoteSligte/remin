@@ -21,16 +21,10 @@ pub fn setup_menu(weak: &Weak<App>) {
 // TODO: F11 for fullscreen
 
 fn main() {
-    unsafe {
-        // prevent installing ffprobe and ffplay
-        std::env::set_var("KEEP_ONLY_FFMPEG", "true");
-    }
-    ffmpeg_sidecar::download::auto_download().unwrap();
-
     pretty_env_logger::init();
     let app = App::new().unwrap();
     server::setup(&app);
     client::setup(&app);
     info!("Created app");
-    app.run().unwrap();
+    app.run().unwrap();    
 }

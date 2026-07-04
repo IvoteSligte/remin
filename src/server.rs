@@ -1,16 +1,13 @@
 use enigo::{Enigo, Keyboard, Settings};
-use ffmpeg_sidecar::{child::FfmpegChild, command::FfmpegCommand};
 use log::{debug, info};
 use slint::{ComponentHandle, Weak};
-use std::{
-    io::{self, BufRead as _, BufReader},
-    net::TcpListener,
-    sync::Arc,
-};
+use std::sync::Mutex;
+use std::{io, net::TcpListener, sync::Arc};
 
+use crate::common::PacketStream;
 use crate::{
     App,
-    common::{INPUT_PORT, Key, Signal, VIDEO_PORT, read_exact_non_blocking},
+    common::{PORT, Packet, Signal},
     setup_menu,
 };
 
@@ -18,93 +15,33 @@ use crate::{
 // TODO: stop server input TCP stream when Escape is pressed
 // TODO: use frame timestamps
 
-const FRAME_RATE: usize = 60;
+const FRAME_RATE: u64 = 30;
 
-#[derive(Clone, Copy)]
-struct Config {
-    format: &'static str,
-    input: &'static str,
-    codec_video: &'static str,
-    args: &'static [&'static str],
-}
-
-impl Config {
-    fn run(self, client_ip: String) -> anyhow::Result<std::thread::JoinHandle<()>> {
-        let Self {
-            format,
-            input,
-            codec_video,
-            args,
-        } = self;
-        let mut process = FfmpegCommand::new()
-            .rate(FRAME_RATE as _)
-            .format(format)
-            .input(input)
-            .codec_video(codec_video)
-            .args(["-b:v", "12M"])
-            .args(args)
-            .format("mpegts")
-            .output(format!(
-                "srt://{client_ip}:{VIDEO_PORT}?mode=caller&latency=50"
-            ))
-            .print_command()
-            .spawn()?;
-        Ok(std::thread::spawn(move || {
-            println!("FFMPEG output:");
-            process
-                .iter()
+// TODO: use something faster than Arc<Mutex<PacketStream>>, probably just a second channel
+fn start_screen_cast(stream: Arc<Mutex<PacketStream>>) {
+    std::thread::spawn(move || {
+        for janck::Rgb8Image {
+            width,
+            height,
+            data,
+        } in janck::capture_video(FRAME_RATE)
+        {
+            let timestamp = chrono::Utc::now();
+            debug!("Sending frame at {timestamp} ({width}x{height}) to client");
+            stream
+                .lock()
                 .unwrap()
-                .for_each(|message| println!("{message:?}"));
-            process.wait().unwrap();
-        }))
-    }
+                .send(&Packet::Rgb8 {
+                    timestamp: timestamp.timestamp_nanos_opt().unwrap(),
+                    width,
+                    height,
+                    data,
+                })
+                .unwrap();
+        }
+    });
+    info!("Started screen cast");
 }
-
-#[cfg(any(target_os = "windows", target_os = "linux"))]
-const NVENC_ARGS: &[&str] = &[
-    "-preset",
-    "p1",
-    "-tune",
-    "ll",
-    "-rc",
-    "cbr",
-    "-bufsize",
-    "24M",
-    "-rc-lookahead",
-    "0",
-    "-bf",
-    "0",
-    "-g",
-    "120",
-    "-pix_fmt",
-    "yuv420p",
-];
-
-#[cfg(target_os = "macos")]
-const AVFOUNDATION_ARGS: &[&str] = &["-realtime", "true"];
-
-#[cfg(target_os = "windows")]
-const CONFIG: Config = Config {
-    format: "gdigrab",
-    input: "desktop",
-    codec_video: "h264_nvenc",
-};
-
-//     -preset p1" -tune ll" "-rc" "cbr" "-bufsize" "24M -rc-lookahead 0 -bf 0 -g 120 -pix_fmt yuv420p
-#[cfg(target_os = "linux")]
-const CONFIG: Config = Config {
-    format: "pipewire",
-    input: ":0.0",
-    codec_video: "h264_nvenc",
-    args: NVENC_ARGS,
-};
-
-#[cfg(target_os = "macos")]
-const CONFIG: Config = Config {
-    format: "avfoundation",
-    input: "1:none",
-    codec_video: "h264_videotoolbox",
-};
 
 struct Signals {
     connected: Signal,
@@ -134,13 +71,13 @@ fn start(weak: Weak<App>) -> anyhow::Result<Arc<Signals>> {
     info!("Creating virtual keyboard (Enigo)");
     let mut enigo = Enigo::new(&Settings::default())?;
     info!("Creating TCP listener");
-    let listener = TcpListener::bind(format!("0.0.0.0:{INPUT_PORT}"))?;
+    let listener = TcpListener::bind(format!("0.0.0.0:{PORT}"))?;
     let signals = Arc::new(Signals::new());
     let signals2 = signals.clone();
     info!("Spawning TCP server thread");
     std::thread::spawn(move || {
         info!("Waiting for client connection");
-        let (mut stream, client_address) = loop {
+        let (stream, _) = loop {
             if signals.stop_request.signaled() {
                 info!("Stopped server");
                 signals.stopped.signal();
@@ -158,10 +95,11 @@ fn start(weak: Weak<App>) -> anyhow::Result<Arc<Signals>> {
                 }
             };
         };
+        let stream = Arc::new(Mutex::new(PacketStream::new(stream)));
         signals.connected.signal();
         info!("Client connected");
         set_connected(weak.clone(), true);
-        let screen_cast = CONFIG.run(client_address.ip().to_string()).unwrap();
+        start_screen_cast(stream.clone());
         info!("Screen cast started");
         loop {
             if signals.stop_request.signaled() {
@@ -170,11 +108,10 @@ fn start(weak: Weak<App>) -> anyhow::Result<Arc<Signals>> {
                 signals.stopped.signal();
                 return;
             }
-            if let Some(bytes) = read_exact_non_blocking(&mut stream) {
-                let key = Key::decode(bytes);
+            if let Some(Packet::Input(key)) = stream.lock().unwrap().recv().unwrap() {
                 debug!("Read {:?}", key);
                 enigo
-                    .key(enigo::Key::Unicode(key.char), key.action)
+                    .key(enigo::Key::Unicode(key.char), key.action.into())
                     .unwrap();
             }
         }
