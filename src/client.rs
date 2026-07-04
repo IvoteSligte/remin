@@ -24,6 +24,7 @@ fn start_channel(weak: Weak<App>, server_ip: &str) -> io::Result<Arc<Mutex<Packe
     std::thread::spawn(move || {
         info!("Started packet processing loop");
         let stream = stream.clone();
+        let fps = fps_ticker::Fps::default();
 
         loop {
             let Some(packet) = stream.lock().unwrap().recv().unwrap() else {
@@ -37,13 +38,13 @@ fn start_channel(weak: Weak<App>, server_ip: &str) -> io::Result<Arc<Mutex<Packe
                     height,
                     data,
                 } => {
+                    let now = Utc::now();
                     let timestamp = chrono::DateTime::<Utc>::from_timestamp_nanos(timestamp);
+                    fps.tick();
                     debug!(
-                        "Received frame at {} from server ({}ms delay, {}x{})",
-                        timestamp,
-                        (Utc::now() - timestamp).num_milliseconds(),
-                        width,
-                        height
+                        "Received frame at {timestamp} from server ({}ms delay, {:.2} fps, {width}x{height})",
+                        (now - timestamp).num_milliseconds(),
+                        fps.avg(),
                     );
                     let mut buffer = slint::SharedPixelBuffer::new(width as _, height as _);
                     buffer.make_mut_bytes().copy_from_slice(&data);

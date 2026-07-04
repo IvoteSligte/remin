@@ -38,6 +38,10 @@ fn start_screen_cast(stream: Arc<Mutex<PacketStream>>) {
                     data,
                 })
                 .unwrap();
+            debug!(
+                "Sent frame write duration: {}ms",
+                (chrono::Utc::now() - timestamp).num_milliseconds()
+            );
         }
     });
     info!("Started screen cast");
