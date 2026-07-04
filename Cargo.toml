@@ -16,3 +16,6 @@ janck = { path = "../janck" }
 slint = "1.17.0"
 bitcode = "0.6.9"
 chrono = "0.4.45"
+
+[profile.dev.package.janck]
+opt-level = 3

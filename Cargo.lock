@@ -2554,7 +2554,12 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 name = "janck"
 version = "0.1.0"
 dependencies = [
- "miniscreenshot-wayland",
+ "libc",
+ "log",
+ "memmap2",
+ "miniscreenshot",
+ "wayland-client",
+ "wayland-protocols-wlr",
 ]
 
 [[package]]
@@ -2891,25 +2896,11 @@ checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
 name = "miniscreenshot"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0dc6635576b3d354a84e3c1fdab7fc0999a9c9123fef22b25dc2cd8ef8a6aad9"
+checksum = "1b668f24b11d2f5aee131b1f64ff98678c449804d768a2900a3e07024f9c2a3f"
 dependencies = [
  "png",
-]
-
-[[package]]
-name = "miniscreenshot-wayland"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3fcfea278c23470152c18947b0306e012f95f63b4bbb838aec2d9d3d6bdde935"
-dependencies = [
- "libc",
- "memmap2",
- "miniscreenshot",
- "tempfile",
- "wayland-client",
- "wayland-protocols-wlr",
 ]
 
 [[package]]
