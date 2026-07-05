@@ -4,6 +4,9 @@ use slint::{ComponentHandle, Weak};
 mod client;
 mod common;
 mod server;
+mod tcp;
+mod udp;
+mod signal;
 
 slint::include_modules!();
 
@@ -26,5 +29,5 @@ fn main() {
     server::setup(&app);
     client::setup(&app);
     info!("Created app");
-    app.run().unwrap();    
+    app.run().unwrap();
 }

@@ -1,15 +1,12 @@
 use enigo::{Enigo, Keyboard, Settings};
 use log::{debug, info};
 use slint::{ComponentHandle, Weak};
-use std::sync::Mutex;
-use std::{io, net::TcpListener, sync::Arc};
+use std::io;
+use std::net::SocketAddr;
 
-use crate::common::PacketStream;
-use crate::{
-    App,
-    common::{PORT, Packet, Signal},
-    setup_menu,
-};
+use crate::common::{CLIENT_UDP_PORT, PacketStreams, SERVER_TCP_PORT, SERVER_UDP_PORT};
+use crate::{App, setup_menu, signal::Signal};
+use crate::{tcp, udp};
 
 // TODO: stop client/server video streams when Escape is pressed
 // TODO: stop server input TCP stream when Escape is pressed
@@ -17,8 +14,18 @@ use crate::{
 
 const FRAME_RATE: u64 = 30;
 
-// TODO: use something faster than Arc<Mutex<PacketStream>>, probably just a second channel
-fn start_screen_cast(stream: Arc<Mutex<PacketStream>>) {
+/// Returns `Ok(None)` if stop was signaled during the creation process.
+pub fn create_streams(stop: Signal) -> io::Result<Option<PacketStreams>> {
+    let Some((tcp, client_addr)) = tcp::PacketStream::new_server(SERVER_TCP_PORT, stop.clone())?
+    else {
+        return Ok(None);
+    };
+    let client_udp_addr = SocketAddr::new(client_addr.ip(), CLIENT_UDP_PORT);
+    let udp = udp::PacketStream::new(SERVER_UDP_PORT, client_udp_addr, stop)?;
+    Ok(Some((tcp, udp)))
+}
+
+fn start_screen_cast(udp: udp::PacketStream) {
     std::thread::spawn(move || {
         for janck::Yuv420Image {
             width,
@@ -33,21 +40,18 @@ fn start_screen_cast(stream: Arc<Mutex<PacketStream>>) {
         {
             let timestamp = chrono::Utc::now();
             debug!("Sending frame at {timestamp} ({width}x{height}) to client");
-            stream
-                .lock()
-                .unwrap()
-                .send(&Packet::Yuv {
-                    timestamp: timestamp.timestamp_nanos_opt().unwrap(),
-                    width,
-                    height,
-                    y_stride,
-                    u_stride,
-                    v_stride,
-                    y_plane,
-                    u_plane,
-                    v_plane,
-                })
-                .unwrap();
+            udp.send(&udp::Packet::Yuv {
+                timestamp: timestamp.timestamp_nanos_opt().unwrap(),
+                width,
+                height,
+                y_stride,
+                u_stride,
+                v_stride,
+                y_plane,
+                u_plane,
+                v_plane,
+            })
+            .unwrap();
             debug!(
                 "Sent frame write duration: {}ms",
                 (chrono::Utc::now() - timestamp).num_milliseconds()
@@ -57,97 +61,52 @@ fn start_screen_cast(stream: Arc<Mutex<PacketStream>>) {
     info!("Started screen cast");
 }
 
-struct Signals {
-    connected: Signal,
-    stop_request: Signal,
-    stopped: Signal,
-}
-
-impl Signals {
-    fn new() -> Self {
-        Self {
-            connected: Signal::new(),
-            stop_request: Signal::new(),
-            stopped: Signal::new(),
-        }
-    }
-}
-
-fn set_connected(weak: Weak<App>, value: bool) {
-    weak.upgrade_in_event_loop(move |app: App| {
-        app.set_client_connected(value);
-    })
-    .unwrap();
-}
-
-fn start(weak: Weak<App>) -> anyhow::Result<Arc<Signals>> {
+fn start(weak: Weak<App>, stop_signal: Signal) -> anyhow::Result<()> {
     info!("Starting server");
     info!("Creating virtual keyboard (Enigo)");
     let mut enigo = Enigo::new(&Settings::default())?;
-    info!("Creating TCP listener");
-    let listener = TcpListener::bind(format!("0.0.0.0:{PORT}"))?;
-    let signals = Arc::new(Signals::new());
-    let signals2 = signals.clone();
-    info!("Spawning TCP server thread");
+    info!("Spawning packet management thread");
     std::thread::spawn(move || {
-        info!("Waiting for client connection");
-        let (stream, _) = loop {
-            if signals.stop_request.signaled() {
-                info!("Stopped server");
-                signals.stopped.signal();
-                return;
-            }
-            listener.set_nonblocking(true).unwrap();
-            match listener.accept() {
-                Ok(client) => break client,
-                Err(err) => {
-                    if err.kind() == io::ErrorKind::WouldBlock {
-                        continue;
-                    } else {
-                        unreachable!();
-                    }
-                }
-            };
-        };
-        let stream = Arc::new(Mutex::new(PacketStream::new(stream)));
-        signals.connected.signal();
+        info!("Creating packet stream and waiting for client");
+        let (_tcp, udp) = create_streams(stop_signal).unwrap().unwrap();
+        let udp2 = udp.clone();
+        weak.upgrade_in_event_loop(|app| app.set_client_connected(true))
+            .unwrap();
         info!("Client connected");
-        set_connected(weak.clone(), true);
-        start_screen_cast(stream.clone());
+        start_screen_cast(udp2.clone());
         info!("Screen cast started");
         loop {
-            if signals.stop_request.signaled() {
-                info!("Stopped server");
-                set_connected(weak, false);
-                signals.stopped.signal();
-                return;
-            }
-            if let Some(Packet::Input(key)) = stream.lock().unwrap().recv().unwrap() {
-                debug!("Read {:?}", key);
-                enigo
-                    .key(enigo::Key::Unicode(key.char), key.action.into())
-                    .unwrap();
-            }
+            let udp::Packet::Input(key) = udp2.recv().unwrap() else {
+                unreachable!();
+            };
+            debug!("Read {:?}", key);
+            enigo
+                .key(enigo::Key::Unicode(key.char), key.action.into())
+                .unwrap();
         }
     });
-    Ok(signals2)
+    Ok(())
 }
 
 pub fn setup(app: &App) {
     let weak = app.as_weak();
 
-    app.on_start_server(move || match start(weak.clone()) {
-        Ok(signals) => {
-            let app = weak.upgrade().unwrap();
-            let weak = app.as_weak();
-            app.on_escape(move || {
-                info!("Stopping server");
-                signals.stop_request.signal();
-                signals.stopped.wait();
-                setup_menu(&weak);
-            });
-            "".into()
+    app.on_start_server(move || {
+        let stop_signal = Signal::new();
+        match start(weak.clone(), stop_signal.clone()) {
+            Ok(()) => {
+                let app = weak.upgrade().unwrap();
+                let weak = app.as_weak();
+                app.on_escape(move || {
+                    info!("Stopping server");
+                    stop_signal.signal();
+                    // TODO: wait for connections to shut down
+                    weak.upgrade().unwrap().set_client_connected(false);
+                    setup_menu(&weak);
+                });
+                "".into()
+            }
+            Err(err) => format!("{:?}", err).into(),
         }
-        Err(err) => format!("{:?}", err).into(),
     });
 }
