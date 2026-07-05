@@ -41,7 +41,7 @@ fn start_screen_cast(udp: udp::PacketStream) {
             let timestamp = chrono::Utc::now();
             debug!("Sending frame at {timestamp} ({width}x{height}) to client");
             udp.send(&udp::Packet::Yuv {
-                timestamp: timestamp.timestamp_nanos_opt().unwrap(),
+                timestamp: timestamp.timestamp_millis(),
                 width,
                 height,
                 y_stride,

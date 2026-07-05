@@ -5,6 +5,7 @@ use std::{
     io,
     net::{SocketAddr, UdpSocket},
     sync::{Arc, Mutex},
+    time::Duration,
 };
 use wincode::{SchemaRead, SchemaWrite};
 
@@ -19,7 +20,7 @@ const MESSAGE_HEADER_SIZE: usize = std::mem::size_of::<MessageHeader>(); // the 
 const MAX_MESSAGE_BODY_SIZE: usize = MAX_MESSAGE_SIZE - MESSAGE_HEADER_SIZE;
 
 // Can be adjusted
-const MAX_LATENCY_MS: i64 = 100; // 100 ms
+const MAX_LATENCY_NS: i64 = 100 * 1000; // 100 milliseconds
 
 // NOTE: make sure there is no implicit padding to prevent encoding/decoding mismatches
 #[derive(Debug, SchemaRead, SchemaWrite)]
@@ -99,37 +100,36 @@ impl PacketStreamSync {
     pub fn send(&mut self, data: &[u8]) -> io::Result<()> {
         // TODO: smarter reliability mechanism than just sending each message N times
         // TODO: encryption
-        for _ in 0..3 {
-            assert!(data.len() > 0);
-            let num_messages = data.len().div_ceil(MAX_MESSAGE_BODY_SIZE);
-            debug!(
-                "Sending packet {} with {} body bytes ({} messages)",
+        assert!(data.len() > 0);
+        let num_messages = data.len().div_ceil(MAX_MESSAGE_BODY_SIZE);
+        debug!(
+            "Sending packet {} with {} body bytes ({} messages)",
+            self.next_packet_id,
+            data.len(),
+            num_messages
+        );
+        for id in 0..num_messages {
+            let start = id as usize * MAX_MESSAGE_BODY_SIZE;
+            let end = (start + MAX_MESSAGE_BODY_SIZE).min(data.len());
+            let body_bytes = &data[start..end];
+            let header = MessageHeader {
+                timestamp: Utc::now().timestamp_millis(),
+                packet_id: self.next_packet_id,
+                message_id: id as _,
+                last_message_in_packet: (num_messages - 1).try_into().unwrap(),
+            };
+            let bytes = &mut self.message_buf;
+            bytes.clear();
+            bytes.extend(wincode::serialize(&header).unwrap());
+            bytes.extend(body_bytes);
+            trace!(
+                "Sending {} byte message {} for packet {}",
+                bytes.len(),
+                id,
                 self.next_packet_id,
-                data.len(),
-                num_messages
             );
-            for id in 0..num_messages {
-                let start = id as usize * MAX_MESSAGE_BODY_SIZE;
-                let end = (start + MAX_MESSAGE_BODY_SIZE).min(data.len());
-                let body_bytes = &data[start..end];
-                let header = MessageHeader {
-                    timestamp: Utc::now().timestamp_millis(),
-                    packet_id: self.next_packet_id,
-                    message_id: id as _,
-                    last_message_in_packet: (num_messages - 1).try_into().unwrap(),
-                };
-                let bytes = &mut self.message_buf;
-                bytes.clear();
-                bytes.extend(wincode::serialize(&header).unwrap());
-                bytes.extend(body_bytes);
-                trace!(
-                    "Sending {} byte message {} for packet {}",
-                    bytes.len(),
-                    id,
-                    self.next_packet_id
-                );
-                self.socket.send(bytes).unwrap();
-            }
+            self.socket.send(bytes).unwrap();
+            std::thread::sleep(Duration::from_micros(200));
         }
         self.next_packet_id = self.next_packet_id.wrapping_add(1);
         Ok(())
@@ -145,13 +145,19 @@ impl PacketStreamSync {
         let header: MessageHeader =
             wincode::deserialize(&message_bytes[0..MESSAGE_HEADER_SIZE]).unwrap();
         if is_out_of_order(header.packet_id, self.last_received_packet_id) {
-            trace!("Dropped out-of-order message");
+            trace!(
+                "Dropped out-of-order message {} for packet {}",
+                header.message_id, header.packet_id
+            );
             return Ok(None);
         }
         let now = Utc::now().timestamp_millis();
         let latency = now - header.timestamp;
-        if latency > MAX_LATENCY_MS {
-            trace!("Dropped message with {latency}ms latency");
+        if latency > MAX_LATENCY_NS {
+            trace!(
+                "Dropped message {} for packet {} with {latency} ms latency",
+                header.message_id, header.packet_id
+            );
             return Ok(None);
         }
         // TODO: fixed-size packet_map to prevent memory leaks
@@ -168,7 +174,7 @@ impl PacketStreamSync {
             info.found[message_id] = true;
             info.num_found += 1;
             trace!(
-                "Received message {} for packet {} ({}/{}, {} ms latency)",
+                "Received new message {} for packet {} ({}/{}, {}ms latency)",
                 message_id,
                 header.packet_id,
                 info.num_found,
@@ -195,13 +201,11 @@ impl PacketStreamSync {
                     last_message_in_packet + 1
                 );
                 let packet = wincode::deserialize(&packet_bytes)?;
-                if skips_packets(header.packet_id, self.last_received_packet_id) {
-                    debug!(
-                        "Packets {} to {} skipped",
-                        self.last_received_packet_id.wrapping_add(1),
-                        header.packet_id.wrapping_sub(1)
-                    );
-                }
+                log_skipped_packets(
+                    header.packet_id,
+                    self.last_received_packet_id,
+                    &self.packet_map,
+                );
                 self.last_received_packet_id = header.packet_id;
                 return Ok(Some(packet));
             }
@@ -216,10 +220,35 @@ fn is_out_of_order(packet_id: u32, last_received_packet_id: u32) -> bool {
     packet_id.wrapping_sub(last_received_packet_id) > (u32::MAX / 2)
 }
 
-fn skips_packets(packet_id: u32, last_received_packet_id: u32) -> bool {
-    // essentially `packet_id - last_received_packet_id > 1`,
-    // but taking into account the fact that packet_id can wrap around
-    packet_id.wrapping_sub(last_received_packet_id) > 1
+fn log_skipped_packets(
+    packet_id: u32,
+    last_received_packet_id: u32,
+    infos: &FxHashMap<u32, PacketInfo>,
+) {
+    let num_missed = packet_id
+        .wrapping_sub(last_received_packet_id)
+        .saturating_sub(1);
+    if num_missed == 0 {
+        return;
+    }
+    for i in 1..=num_missed {
+        let id = last_received_packet_id.wrapping_add(i);
+        match infos.get(&id) {
+            Some(info) => debug!(
+                "Packet {id} skipped ({}/{})",
+                info.num_found,
+                info.found.len()
+            ),
+            None => debug!("Packet {id} skipped (0/unknown)"),
+        }
+    }
+    if num_missed > 5 {
+        debug!(
+            "Packets {} to {} skipped",
+            last_received_packet_id.wrapping_add(1),
+            packet_id.wrapping_sub(1)
+        );
+    }
 }
 
 fn blocking<T>(

@@ -36,7 +36,6 @@ fn start(weak: Weak<App>, server_ip: &str, stop_signal: Signal) -> io::Result<Pa
     std::thread::spawn(move || {
         info!("Started packet processing loop");
         let fps = fps_ticker::Fps::default();
-
         loop {
             let packet = udp2.recv().unwrap();
             match packet {
@@ -53,7 +52,8 @@ fn start(weak: Weak<App>, server_ip: &str, stop_signal: Signal) -> io::Result<Pa
                     v_plane,
                 } => {
                     let now = Utc::now();
-                    let timestamp = chrono::DateTime::<Utc>::from_timestamp_nanos(timestamp);
+                    let timestamp =
+                        chrono::DateTime::<Utc>::from_timestamp_millis(timestamp).unwrap();
                     fps.tick();
                     debug!(
                         "Received frame at {timestamp} from server ({}ms delay, {:.2} fps, {width}x{height})",
