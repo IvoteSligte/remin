@@ -20,10 +20,15 @@ const FRAME_RATE: u64 = 30;
 // TODO: use something faster than Arc<Mutex<PacketStream>>, probably just a second channel
 fn start_screen_cast(stream: Arc<Mutex<PacketStream>>) {
     std::thread::spawn(move || {
-        for janck::Rgb8Image {
+        for janck::Yuv420Image {
             width,
             height,
-            data,
+            y_stride,
+            u_stride,
+            v_stride,
+            y_plane,
+            u_plane,
+            v_plane,
         } in janck::capture_video(FRAME_RATE)
         {
             let timestamp = chrono::Utc::now();
@@ -31,11 +36,16 @@ fn start_screen_cast(stream: Arc<Mutex<PacketStream>>) {
             stream
                 .lock()
                 .unwrap()
-                .send(&Packet::Rgb8 {
+                .send(&Packet::Yuv {
                     timestamp: timestamp.timestamp_nanos_opt().unwrap(),
                     width,
                     height,
-                    data,
+                    y_stride,
+                    u_stride,
+                    v_stride,
+                    y_plane,
+                    u_plane,
+                    v_plane,
                 })
                 .unwrap();
             debug!(

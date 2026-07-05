@@ -75,12 +75,17 @@ impl PacketStream {
 pub enum Packet {
     /// Keyboard input
     Input(Key),
-    /// RGB8 video frame
-    Rgb8 {
+    /// YUV video frame
+    Yuv {
         timestamp: i64,
         width: u32,
         height: u32,
-        data: Vec<u8>,
+        y_stride: u32,
+        u_stride: u32,
+        v_stride: u32,
+        y_plane: Vec<u8>,
+        u_plane: Vec<u8>,
+        v_plane: Vec<u8>,
     },
 }
 

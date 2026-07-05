@@ -32,11 +32,16 @@ fn start_channel(weak: Weak<App>, server_ip: &str) -> io::Result<Arc<Mutex<Packe
             };
             match packet {
                 Packet::Input(_) => unreachable!("Client should not receive input packets"),
-                Packet::Rgb8 {
+                Packet::Yuv {
                     timestamp,
                     width,
                     height,
-                    data,
+                    y_stride,
+                    u_stride,
+                    v_stride,
+                    y_plane,
+                    u_plane,
+                    v_plane,
                 } => {
                     let now = Utc::now();
                     let timestamp = chrono::DateTime::<Utc>::from_timestamp_nanos(timestamp);
@@ -46,8 +51,19 @@ fn start_channel(weak: Weak<App>, server_ip: &str) -> io::Result<Arc<Mutex<Packe
                         (now - timestamp).num_milliseconds(),
                         fps.avg(),
                     );
+                    let yuv_frame = janck::Yuv420Image {
+                        width,
+                        height,
+                        y_stride,
+                        u_stride,
+                        v_stride,
+                        y_plane,
+                        u_plane,
+                        v_plane,
+                    };
+                    let rgb_frame = yuv_frame.to_rgb8().unwrap();
                     let mut buffer = slint::SharedPixelBuffer::new(width as _, height as _);
-                    buffer.make_mut_bytes().copy_from_slice(&data);
+                    buffer.make_mut_bytes().copy_from_slice(&rgb_frame.data);
 
                     weak.upgrade_in_event_loop(move |app| {
                         app.set_video_frame(slint::Image::from_rgb8(buffer));
