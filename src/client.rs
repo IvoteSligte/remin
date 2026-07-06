@@ -51,8 +51,8 @@ fn start(weak: Weak<App>, server_ip: &str, stop_signal: Signal) -> io::Result<Pa
                     let now = Utc::now();
                     fps.tick();
                     debug!(
-                        "Received frame at {timestamp} from server ({}ms latency, {:.2} fps, {width}x{height})",
-                        (now - timestamp).num_milliseconds(),
+                        "Received frame from server ({:.2}ms latency, {:.2} fps, {width}x{height})",
+                        (now - timestamp).num_microseconds().unwrap() as f32 / 1000.0,
                         fps.avg(),
                     );
                     let yuv_frame = janck::Yuv420Image {

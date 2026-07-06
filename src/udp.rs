@@ -24,7 +24,7 @@ const MESSAGE_HEADER_SIZE: usize = 8 + 4 + 2 + 2; // the encoded size of Message
 const MAX_MESSAGE_BODY_SIZE: usize = MAX_MESSAGE_SIZE - MESSAGE_HEADER_SIZE;
 
 // Can be adjusted
-const MAX_LATENCY_MS: i64 = 100;
+const MAX_LATENCY_MS: f32 = 100.0;
 const RECV_BUFFER_CAP: usize = 200; // max number of messages in the receive buffer
 const PACKET_MAP_CAP: usize = 10; // max number of packets in the receiver packet map
 const SEND_SLEEP_DURATION: Duration = Duration::from_micros(200);
@@ -94,13 +94,12 @@ fn spawn_sender_thread(socket: UdpSocket) -> mpsc::Sender<Packet> {
         let mut packet_id = 0u32;
         let mut wait_start = Instant::now();
         let mut avg_wait_duration = RunningAverage::new(1000.0);
-
         loop {
             let packet = receiver.recv().unwrap();
-            let wait_duration = (Instant::now() - wait_start).as_millis();
-            avg_wait_duration.update(wait_duration as _);
+            let wait_duration = (Instant::now() - wait_start).as_micros() as f32 / 1000.0;
+            avg_wait_duration.update(wait_duration);
             debug!(
-                "Spent {}ms waiting since last packet ({:.2}ms on average)",
+                "Spent {:.2}ms waiting since last packet ({:.2}ms on average)",
                 wait_duration,
                 avg_wait_duration.get(),
             );
@@ -112,7 +111,8 @@ fn spawn_sender_thread(socket: UdpSocket) -> mpsc::Sender<Packet> {
                 data.len(),
                 num_messages
             );
-            let packet_timestamp = Utc::now().timestamp_millis();
+            let packet_timestamp = Utc::now().timestamp_micros();
+            let mut sleep_duration = Duration::default();
             for id in 0..num_messages {
                 let start = id as usize * MAX_MESSAGE_BODY_SIZE;
                 let end = (start + MAX_MESSAGE_BODY_SIZE).min(data.len());
@@ -128,21 +128,24 @@ fn spawn_sender_thread(socket: UdpSocket) -> mpsc::Sender<Packet> {
                 bytes.extend(wincode::serialize(&header).unwrap());
                 bytes.extend(body_bytes);
                 trace!(
-                    "Sending {} byte message {} for packet {}",
+                    "Sending {} byte message for packet {} ({}/{})",
                     bytes.len(),
-                    id,
                     packet_id,
+                    id + 1,
+                    num_messages,
                 );
                 socket.send(bytes).unwrap();
+                let before_sleep = Instant::now();
                 std::thread::sleep(SEND_SLEEP_DURATION);
+                sleep_duration += Instant::now() - before_sleep;
             }
-            let duration = Utc::now().timestamp_millis() - packet_timestamp;
-            let sleep_duration = (SEND_SLEEP_DURATION * (num_messages as u32)).as_millis();
+            let duration = (Utc::now().timestamp_micros() - packet_timestamp) as f32 / 1000.0;
+            let sleep_duration = sleep_duration.as_micros() as f32 / 1000.0;
             debug!(
-                "Sending packet {} took {}ms ({}ms processing, {}ms sleeping)",
+                "Sending packet {} took {:.2}ms ({:.2}ms processing, {:.2}ms sleeping)",
                 packet_id,
                 duration,
-                duration - sleep_duration as i64,
+                duration - sleep_duration,
                 sleep_duration,
             );
             packet_id = packet_id.wrapping_add(1);
@@ -222,12 +225,12 @@ impl Receiver {
             self.survival_rate.update(0.0);
             return Ok(None);
         }
-        let now = Utc::now().timestamp_millis();
-        let latency = now - header.packet_timestamp;
+        let now = Utc::now().timestamp_micros();
+        let latency = (now - header.packet_timestamp) as f32 / 1000.0;
         if latency > MAX_LATENCY_MS {
             trace!(
-                "Dropped message {} for packet {} with {latency} ms latency",
-                header.message_id, header.packet_id
+                "Dropped message {} for packet {} with {:.2}ms latency",
+                header.message_id, header.packet_id, latency
             );
             self.survival_rate.update(0.0);
             return Ok(None);
@@ -259,12 +262,12 @@ impl Receiver {
             info.found[message_id] = true;
             info.num_found += 1;
             trace!(
-                "Received new message {} for packet {} ({}/{}, {}ms latency, {:.0}% survival rate)",
+                "Received new message {} for packet {} ({}/{}, {:.2}ms latency, {:.0}% survival rate)",
                 message_id,
                 header.packet_id,
                 info.num_found,
                 header.last_message_in_packet + 1,
-                (Utc::now().timestamp_millis() - header.packet_timestamp),
+                (Utc::now().timestamp_micros() - header.packet_timestamp) as f32 / 1000.0,
                 self.survival_rate.get() * 100.0,
             );
             let last_message_in_packet = header.last_message_in_packet as usize;
@@ -280,7 +283,7 @@ impl Receiver {
             if info.num_found >= info.found.len() {
                 let info = self.packet_map.remove(packet_index).unwrap();
                 debug!(
-                    "Received packet {} with {} body bytes ({} messages)",
+                    "Received packet {} with {} byte body ({} messages)",
                     header.packet_id,
                     info.bytes.len(),
                     last_message_in_packet + 1
@@ -291,7 +294,7 @@ impl Receiver {
                 self.last_packet_id = header.packet_id;
                 return Ok(Some((
                     packet,
-                    DateTime::from_timestamp_millis(info.timestamp).unwrap(),
+                    DateTime::from_timestamp_micros(info.timestamp).unwrap(),
                 )));
             }
         }
