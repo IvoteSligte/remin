@@ -15,6 +15,9 @@ use crate::{
     signal::Signal,
 };
 
+// TODO: reliability mechanism
+// TODO: encryption
+
 // Fixed constants
 const MAX_MESSAGE_SIZE: usize = 65507;
 const MESSAGE_HEADER_SIZE: usize = std::mem::size_of::<MessageHeader>(); // the encoded size of MessageHeader in bytes
@@ -44,7 +47,8 @@ struct PacketInfo {
 #[derive(Clone)]
 pub struct PacketStream {
     stop: Signal,
-    sync: Arc<Mutex<PacketStreamSync>>,
+    sender: Arc<Mutex<Sender>>,
+    receiver: Arc<Mutex<Receiver>>,
 }
 
 impl PacketStream {
@@ -52,63 +56,24 @@ impl PacketStream {
     pub fn new(port: u16, connect_to: SocketAddr, stop: Signal) -> io::Result<Self> {
         let socket = UdpSocket::bind(format!("0.0.0.0:{port}"))?;
         socket.connect(connect_to)?;
-        let socket2 = socket.try_clone().unwrap();
-        let recv_buf = VecDeque::with_capacity(RECV_BUFFER_CAP);
-        let mut packet_map = FxHashMap::<_, PacketInfo>::default();
-        packet_map.reserve(1000);
-        let sync = Arc::new(Mutex::new(PacketStreamSync {
-            socket,
-            recv_rate: RunningAverage::new(10000.0),
-            recv_buf,
-            message_buf: vec![0u8; MAX_MESSAGE_SIZE],
-            packet_map,
-            next_packet_id: 0,
-            last_received_packet_id: 0,
-        }));
-        let sync2 = sync.clone();
-
-        std::thread::spawn(move || {
-            let mut buf = vec![0u8; MAX_MESSAGE_SIZE];
-            loop {
-                socket2.recv(&mut buf).unwrap();
-                let sync = &mut *sync2.lock().unwrap();
-                let (header, body_bytes) = split_message(&buf);
-                if sync.recv_buf.len() >= RECV_BUFFER_CAP {
-                    // remove oldest message
-                    sync.recv_buf.pop_front();
-                    sync.recv_rate.update(0.0);
-                    trace!(
-                        "Dropped message {} of packet {} due to full buffer ({:.0}% survival rate)",
-                        header.message_id,
-                        header.packet_id,
-                        sync.recv_rate.get() * 100.0
-                    );
-                }
-                let index = match sync
-                    .recv_buf
-                    .binary_search_by_key(&header.timestamp, |(header, _)| header.timestamp)
-                {
-                    Ok(i) => i,
-                    Err(i) => i,
-                };
-                sync.recv_buf.insert(index, (header, body_bytes.to_vec()));
-            }
-        });
-
-        Ok(Self { stop, sync })
+        Ok(Self {
+            stop,
+            sender: Sender::new(socket.try_clone()?),
+            receiver: Receiver::new(socket),
+        })
     }
 
     pub fn send(&self, packet: &Packet) -> io::Result<()> {
         assert!(!self.stop.signaled());
         let data = wincode::serialize(&packet).unwrap();
-        self.sync.lock().unwrap().send(&data)
+        self.sender.lock().unwrap().send(&data)
     }
 
     /// Receives a packet, panicking if stop has been signaled.
     pub fn recv(&self) -> anyhow::Result<Packet> {
         loop {
             assert!(!self.stop.signaled());
-            match self.sync.lock().unwrap().recv_non_blocking() {
+            match self.receiver.lock().unwrap().recv_non_blocking() {
                 Ok(Some(packet)) => return Ok(packet),
                 Ok(None) => continue,
                 Err(err) => return Err(err),
@@ -117,28 +82,25 @@ impl PacketStream {
     }
 }
 
-/// PacketStream components requiring mutable access
-struct PacketStreamSync {
+struct Sender {
     socket: UdpSocket,
-    /// Survival rate of messages received
-    recv_rate: RunningAverage,
-    /// Fixed-size buffer of received messages, sorted by timestamp
-    /// (header, body_bytes)
-    recv_buf: VecDeque<(MessageHeader, Vec<u8>)>,
     /// Fixed-size buffer used to store messages during encoding
     message_buf: Vec<u8>,
-    /// Map from packet ID to packet information
-    packet_map: FxHashMap<u32, PacketInfo>,
     /// ID of the next packet to send
     next_packet_id: u32,
-    /// ID of the last complete package received
-    last_received_packet_id: u32,
 }
 
-impl PacketStreamSync {
+impl Sender {
+    pub fn new(socket: UdpSocket) -> Arc<Mutex<Self>> {
+        let sender = Arc::new(Mutex::new(Sender {
+            socket,
+            message_buf: vec![0u8; MAX_MESSAGE_SIZE],
+            next_packet_id: 0,
+        }));
+        sender
+    }
+
     pub fn send(&mut self, data: &[u8]) -> io::Result<()> {
-        // TODO: smarter reliability mechanism than just sending each message N times
-        // TODO: encryption
         assert!(data.len() > 0);
         let num_messages = data.len().div_ceil(MAX_MESSAGE_BODY_SIZE);
         debug!(
@@ -172,6 +134,66 @@ impl PacketStreamSync {
         }
         self.next_packet_id = self.next_packet_id.wrapping_add(1);
         Ok(())
+    }
+}
+
+fn spawn_receiver_thread(socket: UdpSocket, receiver: Arc<Mutex<Receiver>>) {
+    std::thread::spawn(move || {
+        let mut buf = vec![0u8; MAX_MESSAGE_SIZE];
+        loop {
+            socket.recv(&mut buf).unwrap();
+            let receiver = &mut *receiver.lock().unwrap();
+            let (header, body_bytes) = split_message(&buf);
+            if receiver.recv_buf.len() >= RECV_BUFFER_CAP {
+                // remove oldest message
+                receiver.recv_buf.pop_front();
+                receiver.recv_rate.update(0.0);
+                trace!(
+                    "Dropped message {} of packet {} due to full buffer ({:.0}% survival rate)",
+                    header.message_id,
+                    header.packet_id,
+                    receiver.recv_rate.get() * 100.0
+                );
+            }
+            let index = match receiver
+                .recv_buf
+                .binary_search_by_key(&header.timestamp, |(header, _)| header.timestamp)
+            {
+                Ok(i) => i,
+                Err(i) => i,
+            };
+            receiver
+                .recv_buf
+                .insert(index, (header, body_bytes.to_vec()));
+        }
+    });
+}
+
+struct Receiver {
+    /// Survival rate of messages received
+    recv_rate: RunningAverage,
+    /// Fixed-size buffer of received messages, sorted by timestamp
+    /// (header, body_bytes)
+    recv_buf: VecDeque<(MessageHeader, Vec<u8>)>,
+    /// Map from packet ID to packet information
+    packet_map: FxHashMap<u32, PacketInfo>,
+    /// ID of the last complete package received
+    last_received_packet_id: u32,
+}
+
+impl Receiver {
+    pub fn new(socket: UdpSocket) -> Arc<Mutex<Self>> {
+        let recv_buf = VecDeque::with_capacity(RECV_BUFFER_CAP);
+        let mut packet_map = FxHashMap::<_, PacketInfo>::default();
+        packet_map.reserve(1000);
+        let receiver = Arc::new(Mutex::new(Receiver {
+            recv_rate: RunningAverage::new(10000.0),
+            recv_buf,
+            packet_map,
+            last_received_packet_id: 0,
+        }));
+        spawn_receiver_thread(socket, receiver.clone());
+        receiver
     }
 
     /// Returns `Ok(None)` if no (complete) packet has been read.
