@@ -1,3 +1,4 @@
+use chrono::Utc;
 use enigo::{Enigo, Keyboard, Settings};
 use log::{debug, info};
 use slint::{ComponentHandle, Weak};
@@ -38,9 +39,9 @@ fn start_screen_cast(udp: udp::PacketStream) {
             v_plane,
         } in janck::capture_video(FRAME_RATE)
         {
-            let timestamp = chrono::Utc::now();
+            let timestamp = Utc::now();
             debug!("Sending frame at {timestamp} ({width}x{height}) to client");
-            udp.send(&udp::Packet::Yuv {
+            udp.send(udp::Packet::Yuv {
                 timestamp: timestamp.timestamp_millis(),
                 width,
                 height,
@@ -50,12 +51,8 @@ fn start_screen_cast(udp: udp::PacketStream) {
                 y_plane,
                 u_plane,
                 v_plane,
-            })
-            .unwrap();
-            debug!(
-                "Sent frame write duration: {}ms",
-                (chrono::Utc::now() - timestamp).num_milliseconds()
-            );
+            });
+            debug!("time taken to send frame: {}ms", (Utc::now() - timestamp).num_milliseconds());
         }
     });
     info!("Started screen cast");

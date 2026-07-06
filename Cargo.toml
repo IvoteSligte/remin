@@ -19,5 +19,13 @@ fps_ticker = "1.0.0"
 rustc-hash = "2.1.3"
 wincode = { version = "0.5.5", features = ["derive"] }
 
+# always use release profile for janck
+# settings from https://doc.rust-lang.org/cargo/reference/profiles.html#release
 [profile.dev.package.janck]
 opt-level = 3
+# split-debuginfo = '...'  # Platform-specific.
+strip = "none"
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16

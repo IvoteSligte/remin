@@ -115,7 +115,7 @@ pub fn setup(app: &App) {
                             Action::Release
                         },
                     });
-                    udp.send(&packet).unwrap();
+                    udp.send(packet);
                 });
                 "".into()
             }
