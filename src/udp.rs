@@ -1,6 +1,5 @@
 use chrono::{DateTime, Utc};
 use log::{debug, trace};
-use rustc_hash::FxHashMap;
 use std::{
     collections::VecDeque,
     io,
@@ -27,6 +26,7 @@ const MAX_MESSAGE_BODY_SIZE: usize = MAX_MESSAGE_SIZE - MESSAGE_HEADER_SIZE;
 // Can be adjusted
 const MAX_LATENCY_MS: i64 = 100;
 const RECV_BUFFER_CAP: usize = 200; // max number of messages in the receive buffer
+const PACKET_MAP_CAP: usize = 10; // max number of packets in the receiver packet map
 
 // NOTE: make sure there is no implicit padding to prevent encoding/decoding mismatches
 #[derive(Debug, SchemaRead, SchemaWrite)]
@@ -38,6 +38,8 @@ struct MessageHeader {
 }
 
 struct PacketInfo {
+    timestamp: i64,
+    id: u32,
     bytes: Vec<u8>,
     found: Vec<bool>,
     num_found: usize,
@@ -83,6 +85,7 @@ impl PacketStream {
 }
 
 fn spawn_sender_thread(socket: UdpSocket) -> mpsc::Sender<Packet> {
+    // TODO: this channel has no upper bound on size. probably want to use a bounded channel instead?
     let (sender, receiver) = mpsc::channel();
 
     std::thread::spawn(move || {
@@ -152,14 +155,13 @@ fn spawn_receiver_thread(socket: UdpSocket, receiver: Arc<Mutex<Receiver>>) {
                     receiver.survival_rate.get() * 100.0
                 );
             }
-            let index = match receiver
-                .queue
-                .binary_search_by_key(&header.packet_timestamp, |(header, _)| {
-                    header.packet_timestamp
-                }) {
-                Ok(i) => i,
-                Err(i) => i,
-            };
+            let mut index = 0;
+            for (h, _) in &receiver.queue {
+                if h.packet_timestamp >= header.packet_timestamp {
+                    break;
+                }
+                index += 1;
+            }
             receiver.queue.insert(index, (header, body_bytes.to_vec()));
         }
     });
@@ -171,23 +173,20 @@ struct Receiver {
     /// Fixed-size queue of received messages, sorted by timestamp
     /// (header, body_bytes)
     queue: VecDeque<(MessageHeader, Vec<u8>)>,
-    /// Map from packet ID to packet information
-    packet_map: FxHashMap<u32, PacketInfo>,
-    /// ID of the last complete package received
+    /// Sorted by timestamp
+    packet_map: VecDeque<PacketInfo>,
+    /// ID of the last complete packet received
     last_packet_id: u32,
-    /// Timestamp of the last complete package received
+    /// Timestamp of the last complete packet received
     last_packet_timestamp: i64,
 }
 
 impl Receiver {
     pub fn new(socket: UdpSocket) -> Arc<Mutex<Self>> {
-        let recv_buf = VecDeque::with_capacity(RECV_BUFFER_CAP);
-        let mut packet_map = FxHashMap::<_, PacketInfo>::default();
-        packet_map.reserve(1000);
         let receiver = Arc::new(Mutex::new(Receiver {
             survival_rate: RunningAverage::new(10000.0),
-            queue: recv_buf,
-            packet_map,
+            queue: VecDeque::with_capacity(RECV_BUFFER_CAP),
+            packet_map: VecDeque::with_capacity(PACKET_MAP_CAP),
             last_packet_id: 0,
             last_packet_timestamp: 0,
         }));
@@ -218,15 +217,27 @@ impl Receiver {
             self.survival_rate.update(0.0);
             return Ok(None);
         }
-        // TODO: fixed-size packet_map to prevent memory leaks
-        let info = self.packet_map.entry(header.packet_id).or_insert_with(|| {
-            let num_messages_in_packet = header.last_message_in_packet as usize + 1;
-            PacketInfo {
-                bytes: vec![0u8; num_messages_in_packet * MAX_MESSAGE_BODY_SIZE],
-                found: vec![false; num_messages_in_packet],
-                num_found: 0,
+        let (packet_index, info) = match self
+            .packet_map
+            .binary_search_by_key(&header.packet_timestamp, |info| info.timestamp)
+        {
+            Ok(index) => (index, &mut self.packet_map[index]),
+            Err(index) => {
+                let num_messages_in_packet = header.last_message_in_packet as usize + 1;
+                let info = PacketInfo {
+                    timestamp: header.packet_timestamp,
+                    id: header.packet_id,
+                    bytes: vec![0u8; num_messages_in_packet * MAX_MESSAGE_BODY_SIZE],
+                    found: vec![false; num_messages_in_packet],
+                    num_found: 0,
+                };
+                if self.packet_map.len() >= PACKET_MAP_CAP {
+                    self.packet_map.pop_front();
+                }
+                self.packet_map.insert(index, info);
+                (index, &mut self.packet_map[index])
             }
-        });
+        };
         self.survival_rate.update(1.0);
         let message_id = header.message_id as usize;
         if !info.found[message_id] {
@@ -252,20 +263,20 @@ impl Receiver {
             info.bytes[start..end].copy_from_slice(&body_bytes);
 
             if info.num_found >= info.found.len() {
-                let packet_bytes = self.packet_map.remove(&header.packet_id).unwrap().bytes;
+                let info = self.packet_map.remove(packet_index).unwrap();
                 debug!(
                     "Received packet {} with {} body bytes ({} messages)",
                     header.packet_id,
-                    packet_bytes.len(),
+                    info.bytes.len(),
                     last_message_in_packet + 1
                 );
-                let packet = wincode::deserialize(&packet_bytes)?;
-                log_skipped_packets(header.packet_id, self.last_packet_id, &self.packet_map);
-                self.last_packet_id = header.packet_id;
+                drop_skipped_packets(header.packet_id, self.last_packet_id, &mut self.packet_map);
+                let packet = wincode::deserialize(&info.bytes)?;
                 self.last_packet_timestamp = header.packet_timestamp;
+                self.last_packet_id = header.packet_id;
                 return Ok(Some((
                     packet,
-                    DateTime::from_timestamp_millis(header.packet_timestamp).unwrap(),
+                    DateTime::from_timestamp_millis(info.timestamp).unwrap(),
                 )));
             }
         }
@@ -280,34 +291,36 @@ fn split_message(message: &[u8]) -> (MessageHeader, &[u8]) {
 }
 
 // Takes into account the fact that packet_id can wrap around from u32::MAX to 0
-fn log_skipped_packets(
+fn drop_skipped_packets(
     packet_id: u32,
-    last_received_packet_id: u32,
-    infos: &FxHashMap<u32, PacketInfo>,
+    last_packet_id: u32,
+    packet_map: &mut VecDeque<PacketInfo>,
 ) {
-    let num_missed = packet_id
-        .wrapping_sub(last_received_packet_id)
-        .saturating_sub(1);
+    let num_missed = packet_id.wrapping_sub(last_packet_id).saturating_sub(1);
     if num_missed == 0 {
         return;
-    }
-    for i in 1..=num_missed {
-        let id = last_received_packet_id.wrapping_add(i);
-        match infos.get(&id) {
-            Some(info) => debug!(
-                "Packet {id} skipped ({}/{})",
-                info.num_found,
-                info.found.len()
-            ),
-            None => debug!("Packet {id} skipped (0/unknown)"),
-        }
     }
     if num_missed > 5 {
         debug!(
             "Packets {} to {} skipped",
-            last_received_packet_id.wrapping_add(1),
+            last_packet_id.wrapping_add(1),
             packet_id.wrapping_sub(1)
         );
+    }
+    for i in 1..=num_missed {
+        let id = last_packet_id.wrapping_add(i);
+        let info = packet_map.get(0).unwrap();
+        if info.id == id {
+            debug!(
+                "Packet {} skipped ({}/{})",
+                info.id,
+                info.num_found,
+                info.found.len()
+            );
+            packet_map.pop_front();
+        } else {
+            debug!("Packet {} skipped (0/unknown)", info.id);
+        }
     }
 }
 

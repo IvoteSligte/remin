@@ -123,24 +123,28 @@ export component App inherits Window {
 
     in property <bool> client-connected: false;
 
-    if view == "server": VerticalLayout {
-        VerticalLayout {
-            height: 10%;
+    VerticalLayout {
+        visible: view == "server";
+        height: 10%;
 
-            Text {
-                text: "Server";
-            }
+        Text {
+            text: "Server";
+        }
 
-            Text {
-                text: client-connected ? "Client connected." : "Waiting for client connection...";
-            }
+        Text {
+            text: client-connected ? "Client connected." : "Waiting for client connection...";
         }
     }
 
-    video-display := Image {
+    VerticalLayout {
         visible: view == "client";
-        Text {
-            text: "Client";
+
+        video-display := Image {
+            VerticalLayout {
+                Text {
+                    text: "Client";
+                }
+            }
         }
     }
 }

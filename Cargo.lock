@@ -4084,7 +4084,6 @@ dependencies = [
  "janck",
  "log",
  "pretty_env_logger",
- "rustc-hash 2.1.3",
  "slint",
  "slint-build",
  "wincode",
