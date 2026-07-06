@@ -1,3 +1,5 @@
+#![allow(unused)] // TEMP
+
 use std::{
     io::{self, Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},

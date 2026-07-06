@@ -14,8 +14,6 @@ use crate::{
     tcp, udp,
 };
 
-// FIXME: receiving UDP packets from the server breaks once the clients starts sending packets as well
-
 pub fn create_streams(server_ip: IpAddr, stop: Signal) -> io::Result<PacketStreams> {
     let server_tcp_addr = SocketAddr::new(server_ip, SERVER_TCP_PORT);
     let server_udp_addr = SocketAddr::new(server_ip, SERVER_UDP_PORT);
@@ -37,11 +35,10 @@ fn start(weak: Weak<App>, server_ip: &str, stop_signal: Signal) -> io::Result<Pa
         info!("Started packet processing loop");
         let fps = fps_ticker::Fps::default();
         loop {
-            let packet = udp2.recv().unwrap();
+            let (packet, timestamp) = udp2.recv().unwrap();
             match packet {
                 udp::Packet::Input(_) => unreachable!("Client should not receive input packets"),
                 udp::Packet::Yuv {
-                    timestamp,
                     width,
                     height,
                     y_stride,
@@ -52,8 +49,6 @@ fn start(weak: Weak<App>, server_ip: &str, stop_signal: Signal) -> io::Result<Pa
                     v_plane,
                 } => {
                     let now = Utc::now();
-                    let timestamp =
-                        chrono::DateTime::<Utc>::from_timestamp_millis(timestamp).unwrap();
                     fps.tick();
                     debug!(
                         "Received frame at {timestamp} from server ({}ms latency, {:.2} fps, {width}x{height})",

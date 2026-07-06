@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use log::{debug, trace};
 use rustc_hash::FxHashMap;
 use std::{
@@ -21,7 +21,7 @@ use crate::{
 
 // Fixed constants
 const MAX_MESSAGE_SIZE: usize = 65507;
-const MESSAGE_HEADER_SIZE: usize = std::mem::size_of::<MessageHeader>(); // the encoded size of MessageHeader in bytes
+const MESSAGE_HEADER_SIZE: usize = 8 + 4 + 2 + 2; // the encoded size of MessageHeader in bytes
 const MAX_MESSAGE_BODY_SIZE: usize = MAX_MESSAGE_SIZE - MESSAGE_HEADER_SIZE;
 
 // Can be adjusted
@@ -31,7 +31,7 @@ const RECV_BUFFER_CAP: usize = 200; // max number of messages in the receive buf
 // NOTE: make sure there is no implicit padding to prevent encoding/decoding mismatches
 #[derive(Debug, SchemaRead, SchemaWrite)]
 struct MessageHeader {
-    timestamp: i64,
+    packet_timestamp: i64,
     packet_id: u32,
     message_id: u16,
     last_message_in_packet: u16,
@@ -48,7 +48,7 @@ struct PacketInfo {
 #[derive(Clone)]
 pub struct PacketStream {
     stop: Signal,
-    sender: Arc<Mutex<Sender>>,
+    sender: mpsc::Sender<Packet>,
     receiver: Arc<Mutex<Receiver>>,
 }
 
@@ -59,18 +59,18 @@ impl PacketStream {
         socket.connect(connect_to)?;
         Ok(Self {
             stop,
-            sender: Sender::new(socket.try_clone()?),
+            sender: spawn_sender_thread(socket.try_clone()?),
             receiver: Receiver::new(socket),
         })
     }
 
     pub fn send(&self, packet: Packet) {
         assert!(!self.stop.signaled());
-        self.sender.lock().unwrap().send(packet)
+        self.sender.send(packet).unwrap();
     }
 
     /// Receives a packet, panicking if stop has been signaled.
-    pub fn recv(&self) -> anyhow::Result<Packet> {
+    pub fn recv(&self) -> anyhow::Result<(Packet, DateTime<Utc>)> {
         loop {
             assert!(!self.stop.signaled());
             match self.receiver.lock().unwrap().recv_non_blocking() {
@@ -82,7 +82,9 @@ impl PacketStream {
     }
 }
 
-fn spawn_sender_thread(socket: UdpSocket, receiver: mpsc::Receiver<Packet>) {
+fn spawn_sender_thread(socket: UdpSocket) -> mpsc::Sender<Packet> {
+    let (sender, receiver) = mpsc::channel();
+
     std::thread::spawn(move || {
         let mut message_buf = vec![0u8; MAX_MESSAGE_SIZE];
         let mut packet_id = 0u32;
@@ -103,7 +105,7 @@ fn spawn_sender_thread(socket: UdpSocket, receiver: mpsc::Receiver<Packet>) {
                 let end = (start + MAX_MESSAGE_BODY_SIZE).min(data.len());
                 let body_bytes = &data[start..end];
                 let header = MessageHeader {
-                    timestamp: Utc::now().timestamp_millis(),
+                    packet_timestamp,
                     packet_id,
                     message_id: id as _,
                     last_message_in_packet: (num_messages - 1).try_into().unwrap(),
@@ -129,25 +131,7 @@ fn spawn_sender_thread(socket: UdpSocket, receiver: mpsc::Receiver<Packet>) {
             packet_id = packet_id.wrapping_add(1);
         }
     });
-}
-
-struct Sender {
-    sender: mpsc::Sender<Packet>,
-}
-
-impl Sender {
-    pub fn new(socket: UdpSocket) -> Arc<Mutex<Self>> {
-        let (mpsc_sender, mpsc_receiver) = mpsc::channel();
-        let sender = Arc::new(Mutex::new(Sender {
-            sender: mpsc_sender,
-        }));
-        spawn_sender_thread(socket, mpsc_receiver);
-        sender
-    }
-
-    pub fn send(&mut self, packet: Packet) {
-        self.sender.send(packet).unwrap()
-    }
+    sender
 }
 
 fn spawn_receiver_thread(socket: UdpSocket, receiver: Arc<Mutex<Receiver>>) {
@@ -170,8 +154,9 @@ fn spawn_receiver_thread(socket: UdpSocket, receiver: Arc<Mutex<Receiver>>) {
             }
             let index = match receiver
                 .queue
-                .binary_search_by_key(&header.timestamp, |(header, _)| header.timestamp)
-            {
+                .binary_search_by_key(&header.packet_timestamp, |(header, _)| {
+                    header.packet_timestamp
+                }) {
                 Ok(i) => i,
                 Err(i) => i,
             };
@@ -189,7 +174,9 @@ struct Receiver {
     /// Map from packet ID to packet information
     packet_map: FxHashMap<u32, PacketInfo>,
     /// ID of the last complete package received
-    last_received_packet_id: u32,
+    last_packet_id: u32,
+    /// Timestamp of the last complete package received
+    last_packet_timestamp: i64,
 }
 
 impl Receiver {
@@ -201,18 +188,19 @@ impl Receiver {
             survival_rate: RunningAverage::new(10000.0),
             queue: recv_buf,
             packet_map,
-            last_received_packet_id: 0,
+            last_packet_id: 0,
+            last_packet_timestamp: 0,
         }));
         spawn_receiver_thread(socket, receiver.clone());
         receiver
     }
 
     /// Returns `Ok(None)` if no (complete) packet has been read.
-    pub fn recv_non_blocking(&mut self) -> anyhow::Result<Option<Packet>> {
+    pub fn recv_non_blocking(&mut self) -> anyhow::Result<Option<(Packet, DateTime<Utc>)>> {
         let Some((header, body_bytes)) = self.queue.pop_back() else {
             return Ok(None);
         };
-        if is_out_of_order(header.packet_id, self.last_received_packet_id) {
+        if header.packet_timestamp < self.last_packet_timestamp {
             trace!(
                 "Dropped out-of-order message {} for packet {}",
                 header.message_id, header.packet_id
@@ -221,7 +209,7 @@ impl Receiver {
             return Ok(None);
         }
         let now = Utc::now().timestamp_millis();
-        let latency = now - header.timestamp;
+        let latency = now - header.packet_timestamp;
         if latency > MAX_LATENCY_MS {
             trace!(
                 "Dropped message {} for packet {} with {latency} ms latency",
@@ -250,7 +238,7 @@ impl Receiver {
                 header.packet_id,
                 info.num_found,
                 header.last_message_in_packet + 1,
-                (Utc::now().timestamp_millis() - header.timestamp),
+                (Utc::now().timestamp_millis() - header.packet_timestamp),
                 self.survival_rate.get() * 100.0,
             );
             let last_message_in_packet = header.last_message_in_packet as usize;
@@ -272,13 +260,13 @@ impl Receiver {
                     last_message_in_packet + 1
                 );
                 let packet = wincode::deserialize(&packet_bytes)?;
-                log_skipped_packets(
-                    header.packet_id,
-                    self.last_received_packet_id,
-                    &self.packet_map,
-                );
-                self.last_received_packet_id = header.packet_id;
-                return Ok(Some(packet));
+                log_skipped_packets(header.packet_id, self.last_packet_id, &self.packet_map);
+                self.last_packet_id = header.packet_id;
+                self.last_packet_timestamp = header.packet_timestamp;
+                return Ok(Some((
+                    packet,
+                    DateTime::from_timestamp_millis(header.packet_timestamp).unwrap(),
+                )));
             }
         }
         Ok(None)
@@ -291,12 +279,7 @@ fn split_message(message: &[u8]) -> (MessageHeader, &[u8]) {
     (header, body)
 }
 
-fn is_out_of_order(packet_id: u32, last_received_packet_id: u32) -> bool {
-    // essentially `packet_id < last_received_packet_id`,
-    // but taking into account the fact that packet_id can wrap around
-    packet_id.wrapping_sub(last_received_packet_id) > (u32::MAX / 2)
-}
-
+// Takes into account the fact that packet_id can wrap around from u32::MAX to 0
 fn log_skipped_packets(
     packet_id: u32,
     last_received_packet_id: u32,
@@ -334,7 +317,6 @@ pub enum Packet {
     Input(Key),
     /// YUV video frame
     Yuv {
-        timestamp: i64,
         width: u32,
         height: u32,
         y_stride: u32,

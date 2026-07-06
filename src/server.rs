@@ -1,4 +1,3 @@
-use chrono::Utc;
 use enigo::{Enigo, Keyboard, Settings};
 use fps_ticker::Fps;
 use log::{debug, info};
@@ -50,13 +49,8 @@ fn start_screen_cast(udp: udp::PacketStream) {
         } in frame_receiver
         {
             fps.tick();
-            let timestamp = Utc::now();
-            debug!(
-                "Sending frame at {timestamp} ({width}x{height}, {:.2} fps)",
-                fps.avg(),
-            );
+            debug!("Sending frame ({width}x{height}, {:.2} fps)", fps.avg(),);
             udp.send(udp::Packet::Yuv {
-                timestamp: timestamp.timestamp_millis(),
                 width,
                 height,
                 y_stride,
@@ -66,10 +60,6 @@ fn start_screen_cast(udp: udp::PacketStream) {
                 u_plane,
                 v_plane,
             });
-            debug!(
-                "Time taken to send frame: {}ms",
-                (Utc::now() - timestamp).num_milliseconds()
-            );
         }
     });
     info!("Started screen cast");
@@ -90,7 +80,7 @@ fn start(weak: Weak<App>, stop_signal: Signal) -> anyhow::Result<()> {
         start_screen_cast(udp2.clone());
         info!("Screen cast started");
         loop {
-            let udp::Packet::Input(key) = udp2.recv().unwrap() else {
+            let (udp::Packet::Input(key), _timestamp) = udp2.recv().unwrap() else {
                 unreachable!();
             };
             debug!("Read {:?}", key);
