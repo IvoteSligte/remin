@@ -4,6 +4,7 @@ use slint::{ComponentHandle, Weak};
 use std::{
     io,
     net::{IpAddr, SocketAddr},
+    time::Instant,
 };
 
 use crate::{
@@ -34,6 +35,7 @@ fn start(weak: Weak<App>, server_ip: &str, stop_signal: Signal) -> io::Result<Pa
     std::thread::spawn(move || {
         info!("Started packet processing loop");
         let fps = fps_ticker::Fps::default();
+        let mut last_frame_instant = Instant::now();
         loop {
             let (packet, timestamp) = udp2.recv().unwrap();
             match packet {
@@ -68,6 +70,13 @@ fn start(weak: Weak<App>, server_ip: &str, stop_signal: Signal) -> io::Result<Pa
                     let rgb_frame = yuv_frame.to_rgb8().unwrap();
                     let mut buffer = slint::SharedPixelBuffer::new(width as _, height as _);
                     buffer.make_mut_bytes().copy_from_slice(&rgb_frame.data);
+
+                    let now = Instant::now();
+                    debug!(
+                        "Received frame {:.2}ms after the last",
+                        (now - last_frame_instant).as_micros() as f32 / 1000.0
+                    );
+                    last_frame_instant = now;
 
                     weak.upgrade_in_event_loop(move |app| {
                         app.set_video_frame(slint::Image::from_rgb8(buffer));

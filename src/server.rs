@@ -14,7 +14,8 @@ use crate::{tcp, udp};
 // TODO: stop server input TCP stream when Escape is pressed
 // TODO: use frame timestamps
 
-const FRAME_RATE: u64 = 30;
+// TODO: server UI element for adjusting frame-rate
+const FRAME_RATE: u64 = 75;
 
 /// Returns `Ok(None)` if stop was signaled during the creation process.
 pub fn create_streams(stop: Signal) -> io::Result<Option<PacketStreams>> {
