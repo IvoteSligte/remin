@@ -2573,7 +2573,6 @@ dependencies = [
  "libc",
  "log",
  "memmap2",
- "miniscreenshot",
  "wayland-client",
  "wayland-protocols-wlr",
  "yuv",
@@ -2910,15 +2909,6 @@ name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
-
-[[package]]
-name = "miniscreenshot"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b668f24b11d2f5aee131b1f64ff98678c449804d768a2900a3e07024f9c2a3f"
-dependencies = [
- "png",
-]
 
 [[package]]
 name = "miniz_oxide"

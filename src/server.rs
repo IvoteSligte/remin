@@ -1,9 +1,11 @@
 use chrono::Utc;
 use enigo::{Enigo, Keyboard, Settings};
+use fps_ticker::Fps;
 use log::{debug, info};
 use slint::{ComponentHandle, Weak};
 use std::io;
 use std::net::SocketAddr;
+use std::sync::mpsc;
 
 use crate::common::{CLIENT_UDP_PORT, PacketStreams, SERVER_TCP_PORT, SERVER_UDP_PORT};
 use crate::{App, setup_menu, signal::Signal};
@@ -27,7 +29,15 @@ pub fn create_streams(stop: Signal) -> io::Result<Option<PacketStreams>> {
 }
 
 fn start_screen_cast(udp: udp::PacketStream) {
+    let (frame_sender, frame_receiver) = mpsc::sync_channel(0);
+
     std::thread::spawn(move || {
+        for image in janck::capture_video(FRAME_RATE) {
+            frame_sender.send(image).unwrap();
+        }
+    });
+    std::thread::spawn(move || {
+        let fps = Fps::default();
         for janck::Yuv420Image {
             width,
             height,
@@ -37,10 +47,14 @@ fn start_screen_cast(udp: udp::PacketStream) {
             y_plane,
             u_plane,
             v_plane,
-        } in janck::capture_video(FRAME_RATE)
+        } in frame_receiver
         {
+            fps.tick();
             let timestamp = Utc::now();
-            debug!("Sending frame at {timestamp} ({width}x{height}) to client");
+            debug!(
+                "Sending frame at {timestamp} ({width}x{height}, {:.2} fps)",
+                fps.avg(),
+            );
             udp.send(udp::Packet::Yuv {
                 timestamp: timestamp.timestamp_millis(),
                 width,
@@ -52,7 +66,10 @@ fn start_screen_cast(udp: udp::PacketStream) {
                 u_plane,
                 v_plane,
             });
-            debug!("time taken to send frame: {}ms", (Utc::now() - timestamp).num_milliseconds());
+            debug!(
+                "Time taken to send frame: {}ms",
+                (Utc::now() - timestamp).num_milliseconds()
+            );
         }
     });
     info!("Started screen cast");
