@@ -5,7 +5,7 @@ use std::{
     io,
     net::{SocketAddr, UdpSocket},
     sync::{Arc, Mutex, mpsc},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use wincode::{SchemaRead, SchemaWrite};
 
@@ -27,6 +27,7 @@ const MAX_MESSAGE_BODY_SIZE: usize = MAX_MESSAGE_SIZE - MESSAGE_HEADER_SIZE;
 const MAX_LATENCY_MS: i64 = 100;
 const RECV_BUFFER_CAP: usize = 200; // max number of messages in the receive buffer
 const PACKET_MAP_CAP: usize = 10; // max number of packets in the receiver packet map
+const SEND_SLEEP_DURATION: Duration = Duration::from_micros(200);
 
 // NOTE: make sure there is no implicit padding to prevent encoding/decoding mismatches
 #[derive(Debug, SchemaRead, SchemaWrite)]
@@ -91,9 +92,18 @@ fn spawn_sender_thread(socket: UdpSocket) -> mpsc::Sender<Packet> {
     std::thread::spawn(move || {
         let mut message_buf = vec![0u8; MAX_MESSAGE_SIZE];
         let mut packet_id = 0u32;
+        let mut wait_start = Instant::now();
+        let mut avg_wait_duration = RunningAverage::new(1000.0);
 
         loop {
             let packet = receiver.recv().unwrap();
+            let wait_duration = (Instant::now() - wait_start).as_millis();
+            avg_wait_duration.update(wait_duration as _);
+            debug!(
+                "Spent {}ms waiting since last packet ({:.2}ms on average)",
+                wait_duration,
+                avg_wait_duration.get(),
+            );
             let data = wincode::serialize(&packet).unwrap();
             let num_messages = data.len().div_ceil(MAX_MESSAGE_BODY_SIZE);
             debug!(
@@ -124,14 +134,19 @@ fn spawn_sender_thread(socket: UdpSocket) -> mpsc::Sender<Packet> {
                     packet_id,
                 );
                 socket.send(bytes).unwrap();
-                std::thread::sleep(Duration::from_micros(200));
+                std::thread::sleep(SEND_SLEEP_DURATION);
             }
+            let duration = Utc::now().timestamp_millis() - packet_timestamp;
+            let sleep_duration = (SEND_SLEEP_DURATION * (num_messages as u32)).as_millis();
             debug!(
-                "Sending packet {} took {}ms",
+                "Sending packet {} took {}ms ({}ms processing, {}ms sleeping)",
                 packet_id,
-                Utc::now().timestamp_millis() - packet_timestamp
+                duration,
+                duration - sleep_duration as i64,
+                sleep_duration,
             );
             packet_id = packet_id.wrapping_add(1);
+            wait_start = Instant::now();
         }
     });
     sender
