@@ -56,7 +56,7 @@ fn start(weak: Weak<App>, server_ip: &str, stop_signal: Signal) -> io::Result<Pa
                         chrono::DateTime::<Utc>::from_timestamp_millis(timestamp).unwrap();
                     fps.tick();
                     debug!(
-                        "Received frame at {timestamp} from server ({}ms delay, {:.2} fps, {width}x{height})",
+                        "Received frame at {timestamp} from server ({}ms latency, {:.2} fps, {width}x{height})",
                         (now - timestamp).num_milliseconds(),
                         fps.avg(),
                     );

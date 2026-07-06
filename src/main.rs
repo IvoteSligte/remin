@@ -4,9 +4,9 @@ use slint::{ComponentHandle, Weak};
 mod client;
 mod common;
 mod server;
+mod signal;
 mod tcp;
 mod udp;
-mod signal;
 
 slint::include_modules!();
 

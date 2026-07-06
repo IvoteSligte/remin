@@ -13,6 +13,33 @@ pub fn would_block(err: &io::Error) -> bool {
     err.kind() == io::ErrorKind::WouldBlock
 }
 
+pub struct RunningAverage {
+    value: f32,
+    samples: f32,
+    convergence_window: f32,
+}
+
+impl RunningAverage {
+    pub fn new(convergence_window: f32) -> Self {
+        assert!(convergence_window >= 1.0);
+        Self {
+            value: 0.0,
+            samples: 1.0,
+            convergence_window,
+        }
+    }
+
+    pub fn update(&mut self, sample: f32) {
+        let weight = 1.0 / self.samples;
+        self.value = self.value * (1.0 - weight) + sample * weight;
+        self.samples = f32::min(self.samples + 1.0, self.convergence_window);
+    }
+
+    pub fn get(&self) -> f32 {
+        self.value
+    }
+}
+
 pub type PacketStreams = (tcp::PacketStream, udp::PacketStream);
 
 #[repr(u8)]
