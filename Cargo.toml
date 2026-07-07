@@ -17,6 +17,7 @@ slint = "1.17.0"
 chrono = "0.4.45"
 fps_ticker = "1.0.0"
 wincode = { version = "0.5.5", features = ["derive"] }
+netnet = { version = "0.1.0", path = "../netnet" }
 
 # always use release profile for janck
 # settings from https://doc.rust-lang.org/cargo/reference/profiles.html#release

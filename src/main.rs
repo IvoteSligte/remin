@@ -6,7 +6,6 @@ mod common;
 mod server;
 mod signal;
 mod tcp;
-mod udp;
 
 slint::include_modules!();
 

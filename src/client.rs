@@ -9,10 +9,10 @@ use std::{
 
 use crate::{
     App,
-    common::{Action, CLIENT_UDP_PORT, Key, PacketStreams, SERVER_TCP_PORT, SERVER_UDP_PORT},
+    common::{Action, CLIENT_UDP_PORT, Key, Packet, PacketStreams, SERVER_TCP_PORT, SERVER_UDP_PORT},
     setup_menu,
     signal::Signal,
-    tcp, udp,
+    tcp,
 };
 
 pub fn create_streams(server_ip: IpAddr, stop: Signal) -> io::Result<PacketStreams> {
@@ -20,7 +20,7 @@ pub fn create_streams(server_ip: IpAddr, stop: Signal) -> io::Result<PacketStrea
     let server_udp_addr = SocketAddr::new(server_ip, SERVER_UDP_PORT);
     let tcp = tcp::PacketStream::new_client(server_tcp_addr, stop.clone())
         .map_err(|err| io::Error::other(format!("Failed to create TCP stream: {err}")))?;
-    let udp = udp::PacketStream::new(CLIENT_UDP_PORT, server_udp_addr, stop)
+    let udp = netnet::PacketStream::new(CLIENT_UDP_PORT, server_udp_addr)
         .map_err(|err| io::Error::other(format!("Failed to create UDP stream: {err}")))?;
     Ok((tcp, udp))
 }
@@ -39,8 +39,8 @@ fn start(weak: Weak<App>, server_ip: &str, stop_signal: Signal) -> io::Result<Pa
         loop {
             let (packet, timestamp) = udp2.recv().unwrap();
             match packet {
-                udp::Packet::Input(_) => unreachable!("Client should not receive input packets"),
-                udp::Packet::Yuv {
+                Packet::Input(_) => unreachable!("Client should not receive input packets"),
+                Packet::Yuv {
                     width,
                     height,
                     y_stride,
@@ -111,7 +111,7 @@ pub fn setup(app: &App) {
                         return;
                     };
                     debug!("Key {}: '{}'", action, char);
-                    let packet = udp::Packet::Input(Key {
+                    let packet = Packet::Input(Key {
                         char,
                         action: if action == "pressed" {
                             Action::Press

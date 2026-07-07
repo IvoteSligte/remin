@@ -6,9 +6,9 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::mpsc;
 
-use crate::common::{CLIENT_UDP_PORT, PacketStreams, SERVER_TCP_PORT, SERVER_UDP_PORT};
+use crate::common::{CLIENT_UDP_PORT, Packet, PacketStreams, SERVER_TCP_PORT, SERVER_UDP_PORT};
+use crate::tcp;
 use crate::{App, setup_menu, signal::Signal};
-use crate::{tcp, udp};
 
 // TODO: stop client/server video streams when Escape is pressed
 // TODO: stop server input TCP stream when Escape is pressed
@@ -24,11 +24,11 @@ pub fn create_streams(stop: Signal) -> io::Result<Option<PacketStreams>> {
         return Ok(None);
     };
     let client_udp_addr = SocketAddr::new(client_addr.ip(), CLIENT_UDP_PORT);
-    let udp = udp::PacketStream::new(SERVER_UDP_PORT, client_udp_addr, stop)?;
+    let udp = netnet::PacketStream::new(SERVER_UDP_PORT, client_udp_addr)?;
     Ok(Some((tcp, udp)))
 }
 
-fn start_screen_cast(udp: udp::PacketStream) {
+fn start_screen_cast(udp: netnet::PacketStream<Packet>) {
     let (frame_sender, frame_receiver) = mpsc::sync_channel(0);
 
     std::thread::spawn(move || {
@@ -51,7 +51,7 @@ fn start_screen_cast(udp: udp::PacketStream) {
         {
             fps.tick();
             debug!("Sending frame ({width}x{height}, {:.2} fps)", fps.avg(),);
-            udp.send(udp::Packet::Yuv {
+            udp.send(Packet::Yuv {
                 width,
                 height,
                 y_stride,
@@ -81,7 +81,7 @@ fn start(weak: Weak<App>, stop_signal: Signal) -> anyhow::Result<()> {
         start_screen_cast(udp2.clone());
         info!("Screen cast started");
         loop {
-            let (udp::Packet::Input(key), _timestamp) = udp2.recv().unwrap() else {
+            let (Packet::Input(key), _timestamp) = udp2.recv().unwrap() else {
                 unreachable!();
             };
             debug!("Read {:?}", key);

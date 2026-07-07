@@ -2986,6 +2986,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "netnet"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "log",
+ "wincode",
+]
+
+[[package]]
 name = "new_debug_unreachable"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4083,6 +4093,7 @@ dependencies = [
  "fps_ticker",
  "janck",
  "log",
+ "netnet",
  "pretty_env_logger",
  "slint",
  "slint-build",

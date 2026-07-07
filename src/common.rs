@@ -7,40 +7,13 @@ use std::io;
 use enigo::Direction;
 use wincode::{SchemaRead, SchemaWrite};
 
-use crate::{tcp, udp};
+use crate::tcp;
 
 pub fn would_block(err: &io::Error) -> bool {
     err.kind() == io::ErrorKind::WouldBlock
 }
 
-pub struct RunningAverage {
-    value: f32,
-    samples: f32,
-    convergence_window: f32,
-}
-
-impl RunningAverage {
-    pub fn new(convergence_window: f32) -> Self {
-        assert!(convergence_window >= 1.0);
-        Self {
-            value: 0.0,
-            samples: 1.0,
-            convergence_window,
-        }
-    }
-
-    pub fn update(&mut self, sample: f32) {
-        let weight = 1.0 / self.samples;
-        self.value = self.value * (1.0 - weight) + sample * weight;
-        self.samples = f32::min(self.samples + 1.0, self.convergence_window);
-    }
-
-    pub fn get(&self) -> f32 {
-        self.value
-    }
-}
-
-pub type PacketStreams = (tcp::PacketStream, udp::PacketStream);
+pub type PacketStreams = (tcp::PacketStream, netnet::PacketStream<Packet>);
 
 #[repr(u8)]
 #[derive(Debug, SchemaRead, SchemaWrite)]
@@ -72,4 +45,21 @@ impl From<Action> for Direction {
 pub struct Key {
     pub char: char,
     pub action: Action,
+}
+
+#[derive(SchemaWrite, SchemaRead)]
+pub enum Packet {
+    /// Keyboard input
+    Input(Key),
+    /// YUV video frame
+    Yuv {
+        width: u32,
+        height: u32,
+        y_stride: u32,
+        u_stride: u32,
+        v_stride: u32,
+        y_plane: Vec<u8>,
+        u_plane: Vec<u8>,
+        v_plane: Vec<u8>,
+    },
 }
