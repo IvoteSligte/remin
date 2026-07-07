@@ -6,9 +6,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use netnet::Signal;
 use wincode::{SchemaRead, SchemaWrite};
 
-use crate::{common::would_block, signal::Signal};
+use crate::common::would_block;
 
 #[derive(Clone)]
 pub struct PacketStream {
@@ -30,7 +31,7 @@ impl PacketStream {
         listener.set_nonblocking(true).unwrap();
 
         let (stream, client_addr) = loop {
-            if stop.signaled() {
+            if stop.get() {
                 return Ok(None);
             }
             match listener.accept() {
@@ -45,7 +46,7 @@ impl PacketStream {
     }
 
     pub fn send(&self, packet: &Packet) -> io::Result<()> {
-        assert!(!self.stop.signaled()); // TODO: self.stream.shutdown() on stop signal
+        assert!(!self.stop.get()); // TODO: self.stream.shutdown() on stop signal
         let data = wincode::serialize(packet).unwrap();
         blocking(&mut *self.stream.lock().unwrap(), |stream| {
             stream.write(&u32::to_le_bytes(data.len() as _))?;
@@ -56,7 +57,7 @@ impl PacketStream {
 
     pub fn recv(&self) -> anyhow::Result<Packet> {
         loop {
-            assert!(!self.stop.signaled());
+            assert!(!self.stop.get());
             if let Some(packet) = self.recv_non_blocking()? {
                 return Ok(packet);
             }

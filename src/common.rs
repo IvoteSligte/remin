@@ -1,19 +1,24 @@
+use enigo::Direction;
+use wincode::{SchemaRead, SchemaWrite};
+
+use std::{io, time::Duration};
+
+use crate::tcp;
+
 pub const CLIENT_UDP_PORT: u16 = 8083;
 pub const SERVER_TCP_PORT: u16 = 8084;
 pub const SERVER_UDP_PORT: u16 = 8085;
 
-use std::io;
-
-use enigo::Direction;
-use wincode::{SchemaRead, SchemaWrite};
-
-use crate::tcp;
+pub const MAX_LATENCY: Duration = Duration::from_millis(100);
 
 pub fn would_block(err: &io::Error) -> bool {
     err.kind() == io::ErrorKind::WouldBlock
 }
 
-pub type PacketStreams = (tcp::PacketStream, netnet::PacketStream<Packet>);
+pub type PacketStreams = (
+    tcp::PacketStream,
+    (netnet::Sender<Packet>, netnet::Receiver),
+);
 
 #[repr(u8)]
 #[derive(Debug, SchemaRead, SchemaWrite)]
@@ -51,15 +56,10 @@ pub struct Key {
 pub enum Packet {
     /// Keyboard input
     Input(Key),
-    /// YUV video frame
-    Yuv {
+    /// H.264 video frame
+    H264Frame {
+        bytes: Vec<u8>,
         width: u32,
         height: u32,
-        y_stride: u32,
-        u_stride: u32,
-        v_stride: u32,
-        y_plane: Vec<u8>,
-        u_plane: Vec<u8>,
-        v_plane: Vec<u8>,
     },
 }

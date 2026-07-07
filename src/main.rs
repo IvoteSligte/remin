@@ -4,7 +4,6 @@ use slint::{ComponentHandle, Weak};
 mod client;
 mod common;
 mod server;
-mod signal;
 mod tcp;
 
 slint::include_modules!();

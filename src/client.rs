@@ -1,5 +1,6 @@
 use chrono::Utc;
 use log::{debug, info, warn};
+use netnet::Signal;
 use slint::{ComponentHandle, Weak};
 use std::{
     io,
@@ -9,10 +10,11 @@ use std::{
 
 use crate::{
     App,
-    common::{Action, CLIENT_UDP_PORT, Key, Packet, PacketStreams, SERVER_TCP_PORT, SERVER_UDP_PORT},
-    setup_menu,
-    signal::Signal,
-    tcp,
+    common::{
+        Action, CLIENT_UDP_PORT, Key, MAX_LATENCY, Packet, PacketStreams, SERVER_TCP_PORT,
+        SERVER_UDP_PORT,
+    },
+    setup_menu, tcp,
 };
 
 pub fn create_streams(server_ip: IpAddr, stop: Signal) -> io::Result<PacketStreams> {
@@ -20,35 +22,35 @@ pub fn create_streams(server_ip: IpAddr, stop: Signal) -> io::Result<PacketStrea
     let server_udp_addr = SocketAddr::new(server_ip, SERVER_UDP_PORT);
     let tcp = tcp::PacketStream::new_client(server_tcp_addr, stop.clone())
         .map_err(|err| io::Error::other(format!("Failed to create TCP stream: {err}")))?;
-    let udp = netnet::PacketStream::new(CLIENT_UDP_PORT, server_udp_addr)
+    let udp = netnet::create_stream(CLIENT_UDP_PORT, server_udp_addr, MAX_LATENCY, stop)
         .map_err(|err| io::Error::other(format!("Failed to create UDP stream: {err}")))?;
     Ok((tcp, udp))
 }
 
-fn start(weak: Weak<App>, server_ip: &str, stop_signal: Signal) -> io::Result<PacketStreams> {
+fn start(
+    weak: Weak<App>,
+    server_ip: &str,
+    stop_signal: Signal,
+) -> io::Result<(tcp::PacketStream, netnet::Sender<Packet>)> {
     info!("Creating TCP client");
     // FIXME: parse fail (caused by empty server_ip) results in panic
-    let (tcp, udp) = create_streams(server_ip.parse().unwrap(), stop_signal)?;
+    let (tcp, (udp_sender, mut udp_receiver)) =
+        create_streams(server_ip.parse().unwrap(), stop_signal)?;
     info!("Created TCP client");
-    let udp2 = udp.clone();
 
     std::thread::spawn(move || {
         info!("Started packet processing loop");
+        let mut decoder = openh264::decoder::Decoder::new().unwrap();
         let fps = fps_ticker::Fps::default();
         let mut last_frame_instant = Instant::now();
         loop {
-            let (packet, timestamp) = udp2.recv().unwrap();
+            let (packet, timestamp) = udp_receiver.recv().unwrap();
             match packet {
                 Packet::Input(_) => unreachable!("Client should not receive input packets"),
-                Packet::Yuv {
+                Packet::H264Frame {
+                    bytes,
                     width,
                     height,
-                    y_stride,
-                    u_stride,
-                    v_stride,
-                    y_plane,
-                    u_plane,
-                    v_plane,
                 } => {
                     let now = Utc::now();
                     fps.tick();
@@ -57,19 +59,16 @@ fn start(weak: Weak<App>, server_ip: &str, stop_signal: Signal) -> io::Result<Pa
                         (now - timestamp).num_microseconds().unwrap() as f32 / 1000.0,
                         fps.avg(),
                     );
-                    let yuv_frame = janck::Yuv420Image {
-                        width,
-                        height,
-                        y_stride,
-                        u_stride,
-                        v_stride,
-                        y_plane,
-                        u_plane,
-                        v_plane,
+
+                    // decode to YUV frame and then to Slint image
+                    let pre_decode = Instant::now();
+                    let Some(yuv_frame) = decoder.decode(&bytes).unwrap() else {
+                        warn!("Failed to decode H.264 frame");
+                        continue;
                     };
-                    let rgb_frame = yuv_frame.to_rgb8().unwrap();
-                    let mut buffer = slint::SharedPixelBuffer::new(width as _, height as _);
-                    buffer.make_mut_bytes().copy_from_slice(&rgb_frame.data);
+                    let mut rgb_buffer = slint::SharedPixelBuffer::new(width as _, height as _);
+                    yuv_frame.write_rgb8(rgb_buffer.make_mut_bytes());
+                    debug!("Decoding frame took {:.2}ms", (Instant::now() - pre_decode).as_micros() as f32 / 1000.0);
 
                     let now = Instant::now();
                     debug!(
@@ -79,14 +78,14 @@ fn start(weak: Weak<App>, server_ip: &str, stop_signal: Signal) -> io::Result<Pa
                     last_frame_instant = now;
 
                     weak.upgrade_in_event_loop(move |app| {
-                        app.set_video_frame(slint::Image::from_rgb8(buffer));
+                        app.set_video_frame(slint::Image::from_rgb8(rgb_buffer));
                     })
                     .unwrap();
                 }
             }
         }
     });
-    Ok((tcp, udp))
+    Ok((tcp, udp_sender))
 }
 
 pub fn setup(app: &App) {
@@ -95,14 +94,14 @@ pub fn setup(app: &App) {
     app.on_start_client(move |server_address| {
         let stop_signal = Signal::new();
         match start(weak.clone(), &server_address, stop_signal.clone()) {
-            Ok((_tcp, udp)) => {
+            Ok((_tcp, udp_sender)) => {
                 let app = weak.upgrade().unwrap();
                 let weak = app.as_weak();
                 let stop_signal2 = stop_signal.clone();
 
                 app.on_escape(move || {
                     info!("Stopping client");
-                    stop_signal2.signal();
+                    stop_signal2.set();
                     setup_menu(&weak);
                 });
                 app.on_keyboard_input(move |text, action| {
@@ -119,7 +118,7 @@ pub fn setup(app: &App) {
                             Action::Release
                         },
                     });
-                    udp.send(packet);
+                    udp_sender.send(packet);
                 });
                 "".into()
             }
