@@ -1,5 +1,5 @@
 use log::info;
-use slint::{ComponentHandle, Weak};
+use slint::{ComponentHandle, Weak, wgpu_29::WGPUSettings};
 
 mod client;
 mod common;
@@ -23,6 +23,12 @@ pub fn setup_menu(weak: &Weak<App>) {
 
 fn main() {
     pretty_env_logger::init();
+
+    slint::BackendSelector::new()
+        .require_wgpu_29(slint::wgpu_29::WGPUConfiguration::Automatic(WGPUSettings::default()))
+        .select()
+        .unwrap();
+
     let app = App::new().unwrap();
     server::setup(&app);
     client::setup(&app);
