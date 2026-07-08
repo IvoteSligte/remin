@@ -47,8 +47,8 @@ fn main() {
         .unwrap();
 
     let app = App::new().unwrap();
-    server::setup(&app);
-    client::setup(&app);
+    server::setup(&app, device.clone());
+    client::setup(&app, device);
     info!("Created app");
     app.run().unwrap();
 }
