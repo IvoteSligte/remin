@@ -1,5 +1,9 @@
+use gpu_video::{
+    VulkanInstance,
+    parameters::{VulkanAdapterDescriptor, VulkanDeviceDescriptor},
+};
 use log::info;
-use slint::{ComponentHandle, Weak, wgpu_29::WGPUSettings};
+use slint::{ComponentHandle, Weak};
 
 mod client;
 mod common;
@@ -24,8 +28,21 @@ pub fn setup_menu(weak: &Weak<App>) {
 fn main() {
     pretty_env_logger::init();
 
+    // TODO: integrate Slint's preferred options for creating instance, adapter, device, and queue
+    let instance = VulkanInstance::new().unwrap();
+    let adapter = instance
+        .create_adapter(&VulkanAdapterDescriptor::default())
+        .unwrap();
+    let device = adapter
+        .create_device(&VulkanDeviceDescriptor::default())
+        .unwrap();
     slint::BackendSelector::new()
-        .require_wgpu_29(slint::wgpu_29::WGPUConfiguration::Automatic(WGPUSettings::default()))
+        .require_wgpu_29(slint::wgpu_29::WGPUConfiguration::Manual {
+            instance: instance.wgpu_instance(),
+            adapter: device.wgpu_adapter(),
+            device: device.wgpu_device(),
+            queue: device.wgpu_queue(),
+        })
         .select()
         .unwrap();
 
