@@ -111,7 +111,7 @@ fn start_screen_cast(device: Arc<VulkanDevice>, udp_sender: netnet::Sender<Packe
                             width,
                             height,
                         },
-                        pts: None, // TODO: synchronisation timestamp
+                        pts: None, // TODO: synchronisation timestamp (once there is audio)
                     },
                     false,
                 )
@@ -127,7 +127,6 @@ fn start_screen_cast(device: Arc<VulkanDevice>, udp_sender: netnet::Sender<Packe
             fps.tick();
             debug!("Sending frame ({width}x{height}, {:.2} fps)", fps.avg(),);
             udp_sender.send(Packet::H264Frame {
-                // TODO: send individual NAL units? not sure if a frame corresponds to one or more units
                 bytes: encoded.data,
                 width,
                 height,
@@ -144,7 +143,11 @@ fn start(weak: Weak<App>, device: Arc<VulkanDevice>, stop_signal: Signal) -> any
     info!("Spawning packet management thread");
     std::thread::spawn(move || {
         info!("Creating packet stream and waiting for client");
-        let (_tcp, (udp_sender, mut udp_receiver)) = create_streams(stop_signal).unwrap().unwrap();
+        let Some((_tcp, (udp_sender, mut udp_receiver))) = create_streams(stop_signal).unwrap()
+        else {
+            info!("Stop signal sent while waiting for client connection");
+            return;
+        };
         weak.upgrade_in_event_loop(|app| app.set_client_connected(true))
             .unwrap();
         info!("Client connected");

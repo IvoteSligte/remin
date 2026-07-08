@@ -3,12 +3,7 @@ use gpu_video::{EncodedInputChunk, VulkanDevice, parameters::DecoderParameters};
 use log::{debug, info, warn};
 use netnet::Signal;
 use slint::{ComponentHandle, SharedPixelBuffer, Weak};
-use std::{
-    io,
-    net::{IpAddr, SocketAddr},
-    sync::Arc,
-    time::Instant,
-};
+use std::{io, net::SocketAddr, sync::Arc, time::Instant};
 use yuv::{YuvBiPlanarImage, YuvConversionMode, YuvRange, YuvStandardMatrix};
 
 use crate::{
@@ -17,7 +12,7 @@ use crate::{
         Action, CLIENT_UDP_PORT, Key, MAX_LATENCY, Packet, PacketStreams, SERVER_TCP_PORT,
         SERVER_UDP_PORT,
     },
-    setup_menu, tcp,
+    parse_socket_address, setup_menu, tcp,
 };
 
 // TODO: determine if gpu_video can be used on non-nvidia GPUs (since it uses Nv12 as texture format instead of Yuv420)
@@ -43,9 +38,8 @@ fn yuv_to_rgba(yuv: &[u8], width: u32, height: u32, rgba: &mut [u8]) {
     .unwrap();
 }
 
-fn create_streams(server_ip: IpAddr, stop: Signal) -> io::Result<PacketStreams> {
-    let server_tcp_addr = SocketAddr::new(server_ip, SERVER_TCP_PORT);
-    let server_udp_addr = SocketAddr::new(server_ip, SERVER_UDP_PORT);
+fn create_streams(server_tcp_addr: SocketAddr, stop: Signal) -> io::Result<PacketStreams> {
+    let server_udp_addr = SocketAddr::new(server_tcp_addr.ip(), SERVER_UDP_PORT);
     let tcp = tcp::PacketStream::new_client(server_tcp_addr, stop.clone())
         .map_err(|err| io::Error::other(format!("Failed to create TCP stream: {err}")))?;
     let udp = netnet::create_stream(CLIENT_UDP_PORT, server_udp_addr, MAX_LATENCY, stop)
@@ -56,14 +50,16 @@ fn create_streams(server_ip: IpAddr, stop: Signal) -> io::Result<PacketStreams> 
 fn start(
     weak: Weak<App>,
     device: Arc<VulkanDevice>,
-    server_ip: &str,
+    server_address: &str,
     stop_signal: Signal,
 ) -> io::Result<(tcp::PacketStream, netnet::Sender<Packet>)> {
-    info!("Creating TCP client");
+    info!("Creating network connection");
     // FIXME: parse fail (caused by empty server_ip) results in panic
-    let (tcp, (udp_sender, mut udp_receiver)) =
-        create_streams(server_ip.parse().unwrap(), stop_signal)?;
-    info!("Created TCP client");
+    let (tcp, (udp_sender, mut udp_receiver)) = create_streams(
+        parse_socket_address(server_address, SERVER_TCP_PORT)?,
+        stop_signal,
+    )?;
+    info!("Created network connection");
 
     std::thread::spawn(move || -> ! {
         info!("Started packet processing loop");

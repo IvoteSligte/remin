@@ -8,6 +8,10 @@ component FormField inherits VerticalLayout {
     in-out property <string> error: "";
     callback validate(string) -> string;
 
+    public function ok() -> bool {
+        return error == "";
+    }
+
     alignment: center;
 
     input := LineEdit {
@@ -45,7 +49,6 @@ export component App inherits Window {
                 text: "Start Server";
                 height: 5%;
                 clicked => {
-                    debug("Pressed Start Server");
                     error = start-server();
                     if (error == "") {
                         root.view = "server";
@@ -72,36 +75,38 @@ export component App inherits Window {
             server-ip-field := FormField {
                 height: 7%;
                 width: 50%;
-                placeholder-text: "Enter server IP (e.g. 192.168.1.1)";
-                validate(text) => "";
+                placeholder-text: "Enter server address (e.g. 192.168.1.1)";
+                validate(text) => is-socket-address(text) ? "" : "Invalid address";
             }
 
             Button {
                 height: 5%;
                 text: "Start Client";
                 clicked => {
-                    debug("Pressed Start Client");
-                    error = start-client(server-ip-field.text);
-                    if (error == "") {
-                        root.view = "client";
+                    error = "";
+                    if (server-ip-field.ok()) {
+                        error = start-client(server-ip-field.text);
+                        if (error == "") {
+                            root.view = "client";
+                        }
                     }
                 }
             }
 
-            if (error != ""): Text {
+            Text {
                 text: error;
             }
         }
     }
     callback keyboard-input(key: string, action: string);
     callback escape();
+    pure callback is-socket-address(address: string) -> bool;
     forward-focus: scope;
 
     scope := FocusScope {
         KeyBinding {
             keys: @keys(Escape);
             activated => {
-                debug("Escape Pressed");
                 escape();
                 root.view = "menu";
             }

@@ -1,3 +1,8 @@
+use std::{
+    io,
+    net::{IpAddr, SocketAddr},
+};
+
 use gpu_video::{
     VulkanInstance,
     parameters::{VulkanAdapterDescriptor, VulkanDeviceDescriptor},
@@ -25,6 +30,19 @@ pub fn setup_menu(weak: &Weak<App>) {
 
 // TODO: F11 for fullscreen
 
+fn parse_socket_address(text: &str, default_port: u16) -> io::Result<SocketAddr> {
+    text.parse::<SocketAddr>().or_else(|_| {
+        text.parse::<IpAddr>()
+            .map(|ip| SocketAddr::new(ip, default_port))
+            .map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "invalid ip/socket address syntax",
+                )
+            })
+    })
+}
+
 fn main() {
     pretty_env_logger::init();
 
@@ -47,8 +65,10 @@ fn main() {
         .unwrap();
 
     let app = App::new().unwrap();
+    app.on_is_socket_address(|text| parse_socket_address(&text, 0).is_ok());
+    setup_menu(&app.as_weak());
     server::setup(&app, device.clone());
-    client::setup(&app, device);
+    client::setup(&app, device.clone());
     info!("Created app");
     app.run().unwrap();
 }
