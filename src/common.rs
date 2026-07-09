@@ -1,24 +1,13 @@
 use enigo::Direction;
 use wincode::{SchemaRead, SchemaWrite};
 
-use std::{io, time::Duration};
+use std::time::Duration;
 
-use crate::tcp;
-
-pub const CLIENT_UDP_PORT: u16 = 8083;
 pub const SERVER_TCP_PORT: u16 = 8084;
-pub const SERVER_UDP_PORT: u16 = 8085;
 
 pub const MAX_LATENCY: Duration = Duration::from_millis(100);
 
-pub fn would_block(err: &io::Error) -> bool {
-    err.kind() == io::ErrorKind::WouldBlock
-}
-
-pub type PacketStreams = (
-    tcp::PacketStream,
-    (netnet::Sender<Packet>, netnet::Receiver),
-);
+pub type PacketStreams = (netnet::Sender<Packet>, netnet::Receiver);
 
 #[repr(u8)]
 #[derive(Debug, SchemaRead, SchemaWrite)]

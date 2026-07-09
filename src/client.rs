@@ -3,16 +3,18 @@ use gpu_video::{EncodedInputChunk, VulkanDevice, parameters::DecoderParameters};
 use log::{debug, info, warn};
 use netnet::Signal;
 use slint::{ComponentHandle, SharedPixelBuffer, Weak};
-use std::{io, net::SocketAddr, sync::Arc, time::Instant};
+use std::{
+    io,
+    net::{SocketAddr, TcpStream},
+    sync::Arc,
+    time::Instant,
+};
 use yuv::{YuvBiPlanarImage, YuvConversionMode, YuvRange, YuvStandardMatrix};
 
 use crate::{
     App,
-    common::{
-        Action, CLIENT_UDP_PORT, Key, MAX_LATENCY, Packet, PacketStreams, SERVER_TCP_PORT,
-        SERVER_UDP_PORT,
-    },
-    parse_socket_address, setup_menu, tcp,
+    common::{Action, Key, MAX_LATENCY, Packet, PacketStreams, SERVER_TCP_PORT},
+    parse_socket_address, setup_menu,
 };
 
 // TODO: determine if gpu_video can be used on non-nvidia GPUs (since it uses Nv12 as texture format instead of Yuv420)
@@ -38,13 +40,13 @@ fn yuv_to_rgba(yuv: &[u8], width: u32, height: u32, rgba: &mut [u8]) {
     .unwrap();
 }
 
-fn create_streams(server_tcp_addr: SocketAddr, stop: Signal) -> io::Result<PacketStreams> {
-    let server_udp_addr = SocketAddr::new(server_tcp_addr.ip(), SERVER_UDP_PORT);
-    let tcp = tcp::PacketStream::new_client(server_tcp_addr, stop.clone())
-        .map_err(|err| io::Error::other(format!("Failed to create TCP stream: {err}")))?;
-    let udp = netnet::create_stream(CLIENT_UDP_PORT, server_udp_addr, MAX_LATENCY, stop)
-        .map_err(|err| io::Error::other(format!("Failed to create UDP stream: {err}")))?;
-    Ok((tcp, udp))
+// TODO: check that the UDP client address is the same as the TCP client address
+fn create_streams(server_tcp_addr: SocketAddr, stop: Signal) -> netnet::Result<PacketStreams> {
+    let mut tcp = TcpStream::connect(server_tcp_addr)?;
+    info!("Created TCP stream");
+    let udp = netnet::create_stream_using_hole_punch(&mut tcp, MAX_LATENCY, stop)?;
+    info!("Created UDP stream");
+    Ok(udp)
 }
 
 fn start(
@@ -52,10 +54,10 @@ fn start(
     device: Arc<VulkanDevice>,
     server_address: &str,
     stop_signal: Signal,
-) -> io::Result<(tcp::PacketStream, netnet::Sender<Packet>)> {
+) -> netnet::Result<netnet::Sender<Packet>> {
     info!("Creating network connection");
     // FIXME: parse fail (caused by empty server_ip) results in panic
-    let (tcp, (udp_sender, mut udp_receiver)) = create_streams(
+    let (udp_sender, mut udp_receiver) = create_streams(
         parse_socket_address(server_address, SERVER_TCP_PORT)?,
         stop_signal,
     )?;
@@ -134,7 +136,7 @@ fn start(
             }
         }
     });
-    Ok((tcp, udp_sender))
+    Ok(udp_sender)
 }
 
 pub fn setup(app: &App, device: Arc<VulkanDevice>) {
@@ -148,7 +150,7 @@ pub fn setup(app: &App, device: Arc<VulkanDevice>) {
             &server_address,
             stop_signal.clone(),
         ) {
-            Ok((_tcp, udp_sender)) => {
+            Ok(udp_sender) => {
                 let app = weak.upgrade().unwrap();
                 let weak = app.as_weak();
                 let stop_signal2 = stop_signal.clone();
@@ -177,7 +179,7 @@ pub fn setup(app: &App, device: Arc<VulkanDevice>) {
                 "".into()
             }
             Err(err) => {
-                if err.kind() == io::ErrorKind::InvalidInput {
+                if err.io_kind() == Some(io::ErrorKind::InvalidInput) {
                     return "Invalid address".into();
                 }
                 warn!("Failed to start client: {:?}", err);

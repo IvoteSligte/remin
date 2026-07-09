@@ -13,9 +13,12 @@ use slint::{ComponentHandle, Weak};
 mod client;
 mod common;
 mod server;
-mod tcp;
 
 slint::include_modules!();
+
+// NOTE: the wgpu Slint backend causes an error on program exit:
+// "cannot access a Thread Local Storage value during or after destruction: AccessError"
+// this may be fixed in a future wgpu/slint release, but it is not harmful for now
 
 pub fn setup_menu(weak: &Weak<App>) {
     weak.upgrade_in_event_loop(|app| {

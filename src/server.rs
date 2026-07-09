@@ -3,9 +3,9 @@ use fps_ticker::Fps;
 use gpu_video::VulkanDevice;
 use gpu_video::parameters::{EncoderParametersH264, RateControl, VideoParameters};
 use log::{debug, info};
-use netnet::Signal;
+use netnet::{Error::Stopped, Signal};
 use slint::{ComponentHandle, Weak};
-use std::net::SocketAddr;
+use std::net::{Ipv6Addr, TcpListener, TcpStream};
 use std::sync::{Arc, mpsc};
 use std::time::Instant;
 use std::{io, iter};
@@ -14,10 +14,7 @@ use yuv::{
     YuvStandardMatrix,
 };
 
-use crate::common::{
-    CLIENT_UDP_PORT, MAX_LATENCY, Packet, PacketStreams, SERVER_TCP_PORT, SERVER_UDP_PORT,
-};
-use crate::tcp;
+use crate::common::{MAX_LATENCY, Packet, PacketStreams, SERVER_TCP_PORT};
 use crate::{App, setup_menu};
 
 // TODO: stop client/server video streams when Escape is pressed
@@ -47,15 +44,26 @@ fn bgra_to_yuv(bgra: &[u8], width: u32, height: u32, stride: u32) -> Vec<u8> {
     Vec::from_iter(iter::chain(y_plane, uv_plane))
 }
 
+fn create_tcp_stream(stop: Signal) -> netnet::Result<TcpStream> {
+    let listener = TcpListener::bind((Ipv6Addr::UNSPECIFIED, SERVER_TCP_PORT))?;
+    listener.set_nonblocking(true)?;
+    while !stop.get() {
+        match listener.accept() {
+            Ok((stream, _)) => return Ok(stream),
+            Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => continue,
+            Err(err) => return Err(err.into()),
+        }
+    }
+    Err(Stopped)
+}
+
 /// Returns `Ok(None)` if stop was signaled during the creation process.
-pub fn create_streams(stop: Signal) -> io::Result<Option<PacketStreams>> {
-    let Some((tcp, client_addr)) = tcp::PacketStream::new_server(SERVER_TCP_PORT, stop.clone())?
-    else {
-        return Ok(None);
-    };
-    let client_udp_addr = SocketAddr::new(client_addr.ip(), CLIENT_UDP_PORT);
-    let udp = netnet::create_stream(SERVER_UDP_PORT, client_udp_addr, MAX_LATENCY, Signal::new())?;
-    Ok(Some((tcp, udp)))
+pub fn create_streams(stop: Signal) -> netnet::Result<PacketStreams> {
+    let mut tcp = create_tcp_stream(stop.clone())?;
+    info!("Created TCP stream");
+    let udp = netnet::create_stream_using_hole_punch(&mut tcp, MAX_LATENCY, stop)?;
+    info!("Created UDP stream");
+    Ok(udp)
 }
 
 fn start_screen_cast(device: Arc<VulkanDevice>, udp_sender: netnet::Sender<Packet>) {
@@ -143,10 +151,13 @@ fn start(weak: Weak<App>, device: Arc<VulkanDevice>, stop_signal: Signal) -> any
     info!("Spawning packet management thread");
     std::thread::spawn(move || {
         info!("Creating packet stream and waiting for client");
-        let Some((_tcp, (udp_sender, mut udp_receiver))) = create_streams(stop_signal).unwrap()
-        else {
-            info!("Stop signal sent while waiting for client connection");
-            return;
+        let (udp_sender, mut udp_receiver) = match create_streams(stop_signal) {
+            Ok(ok) => ok,
+            Err(Stopped) => {
+                info!("Stop signal sent while waiting for client connection");
+                return;
+            }
+            Err(err) => panic!("Failed to create connection: {err}"),
         };
         weak.upgrade_in_event_loop(|app| app.set_client_connected(true))
             .unwrap();
