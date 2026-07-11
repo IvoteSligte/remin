@@ -56,6 +56,7 @@ fn start_screen_cast(device: Arc<VulkanDevice>, net_sender: netnet::Sender) {
         let fps = Fps::default();
         // TODO: if janck can capture directly into [wgpu::Texture]s then the entire GPU upload step of encoding can be skipped
         for janck::Frame {
+            timestamp: frame_timestamp,
             bytes,
             width,
             height,
@@ -115,9 +116,10 @@ fn start_screen_cast(device: Arc<VulkanDevice>, net_sender: netnet::Sender) {
                 encoded.data.len(),
                 fps.avg()
             );
-            // max packet size - (sizeof(width) + sizeof(height) + sizeof(&[u8]))
-            for chunk in encoded.data.chunks(netnet::MAX_PACKET_SIZE - 20) {
+            // max packet size - (sizeof(frame_timestamp) + sizeof(width) + sizeof(height) + sizeof(&[u8]))
+            for chunk in encoded.data.chunks(netnet::MAX_PACKET_SIZE - 28) {
                 let raw_packet = wincode::serialize(&Packet::H264 {
+                    frame_timestamp,
                     bytes: chunk,
                     width,
                     height,

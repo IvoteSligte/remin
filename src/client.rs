@@ -63,11 +63,13 @@ fn start(
             match packet {
                 Packet::Input(_) => unreachable!("Client should not receive input packets"),
                 Packet::H264 {
+                    frame_timestamp,
                     width,
                     height,
                     bytes,
                 } => {
-                    let latency = since_micros(raw_packet.timestamp);
+                    let total_latency = since_micros(frame_timestamp);
+                    let network_latency = since_micros(raw_packet.timestamp);
                     // decode to YUV frame and then to Slint image
                     let pre_decode = Instant::now();
                     let yuv_frames = match decoder.decode(EncodedInputChunk {
@@ -86,8 +88,9 @@ fn start(
                     };
                     fps.tick();
                     debug!(
-                        "Received frame from server ({:.2}ms latency, {:.2} fps, {width}x{height})",
-                        latency.num_microseconds().unwrap() as f32 / 1000.0,
+                        "Received frame from server (latency: {:.2}ms network, {:.2}ms total; {:.2} fps)",
+                        network_latency.num_microseconds().unwrap() as f32 / 1000.0,
+                        total_latency.num_microseconds().unwrap() as f32 / 1000.0,
                         fps.avg(),
                     );
                     let pre_rgba = Instant::now();
@@ -115,6 +118,11 @@ fn start(
 
                     weak.upgrade_in_event_loop(move |app| {
                         app.set_video_frame(slint::Image::from_rgba8(rgba_buffer));
+                        debug!(
+                            "Total frame latency: {:.2}ms",
+                            since_micros(frame_timestamp).num_microseconds().unwrap() as f32
+                                / 1000.0
+                        );
                     })
                     .unwrap();
                 }
