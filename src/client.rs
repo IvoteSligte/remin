@@ -67,16 +67,7 @@ fn start(
                     height,
                     bytes,
                 } => {
-                    fps.tick();
-                    debug!(
-                        "Received frame from server ({:.2}ms latency, {:.2} fps, {width}x{height})",
-                        since_micros(raw_packet.timestamp)
-                            .num_microseconds()
-                            .unwrap() as f32
-                            / 1000.0,
-                        fps.avg(),
-                    );
-
+                    let latency = since_micros(raw_packet.timestamp);
                     // decode to YUV frame and then to Slint image
                     let pre_decode = Instant::now();
                     let yuv_frames = match decoder.decode(EncodedInputChunk {
@@ -89,11 +80,16 @@ fn start(
                             continue;
                         }
                     };
-                    // TODO: are there ever multiple frames or only 0/1 for one frame sent?
                     let Some(yuv_frame) = yuv_frames.get(0) else {
                         warn!("Failed to decode H.264 frame");
                         continue;
                     };
+                    fps.tick();
+                    debug!(
+                        "Received frame from server ({:.2}ms latency, {:.2} fps, {width}x{height})",
+                        latency.num_microseconds().unwrap() as f32 / 1000.0,
+                        fps.avg(),
+                    );
                     let pre_rgba = Instant::now();
                     let mut rgba_buffer = SharedPixelBuffer::new(width, height);
                     yuv_to_rgba(
