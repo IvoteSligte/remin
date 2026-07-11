@@ -43,17 +43,22 @@ fn bgra_to_yuv(bgra: &[u8], width: u32, height: u32, stride: u32) -> Vec<u8> {
     Vec::from_iter(iter::chain(y_plane, uv_plane))
 }
 
-fn start_screen_cast(device: Arc<VulkanDevice>, net_sender: netnet::Sender) {
-    let (frame_sender, frame_receiver) = mpsc::sync_channel(0);
+fn start_screen_cast(
+    device: Arc<VulkanDevice>,
+    net_sender: netnet::Sender,
+) -> Result<(), janck::Error> {
+    let (frame_sender, frame_receiver) = mpsc::sync_channel::<janck::Frame>(0);
+    let video = janck::capture_video(FRAME_RATE)?;
 
     std::thread::spawn(move || {
-        for frame in janck::capture_video(FRAME_RATE as _) {
+        for frame in video {
             frame_sender.send(frame).unwrap();
         }
     });
     std::thread::spawn(move || {
         let mut encoder = None;
         let fps = Fps::default();
+
         // TODO: if janck can capture directly into [wgpu::Texture]s then the entire GPU upload step of encoding can be skipped
         for janck::Frame {
             timestamp: frame_timestamp,
@@ -130,6 +135,7 @@ fn start_screen_cast(device: Arc<VulkanDevice>, net_sender: netnet::Sender) {
         }
     });
     info!("Started screen cast");
+    Ok(())
 }
 
 fn start(weak: Weak<App>, device: Arc<VulkanDevice>, stop_signal: Signal) -> anyhow::Result<()> {
@@ -152,7 +158,7 @@ fn start(weak: Weak<App>, device: Arc<VulkanDevice>, stop_signal: Signal) -> any
         weak.upgrade_in_event_loop(|app| app.set_client_connected(true))
             .unwrap();
         info!("Client connected");
-        start_screen_cast(device, net_sender);
+        start_screen_cast(device, net_sender).unwrap();
         info!("Screen cast started");
         loop {
             let raw_packet = net_receiver.recv().unwrap();
