@@ -1,13 +1,9 @@
 use enigo::Direction;
+use netnet::TimeDelta;
 use wincode::{SchemaRead, SchemaWrite};
 
-use std::time::Duration;
-
-pub const SERVER_TCP_PORT: u16 = 8084;
-
-pub const MAX_LATENCY: Duration = Duration::from_millis(100);
-
-pub type PacketStreams = (netnet::Sender<Packet>, netnet::Receiver);
+pub const SERVER_PORT: u16 = 8084;
+pub const MAX_LATENCY: TimeDelta = TimeDelta::milliseconds(100);
 
 #[repr(u8)]
 #[derive(Debug, SchemaRead, SchemaWrite)]
@@ -42,13 +38,13 @@ pub struct Key {
 }
 
 #[derive(SchemaWrite, SchemaRead)]
-pub enum Packet {
+pub enum Packet<'a> {
     /// Keyboard input
     Input(Key),
-    /// H.264 video frame
-    H264Frame {
-        bytes: Vec<u8>,
+    /// H.264 video fragment
+    H264 {
         width: u32,
         height: u32,
+        bytes: &'a [u8],
     },
 }

@@ -5,16 +5,15 @@ use gpu_video::parameters::{EncoderParametersH264, RateControl, VideoParameters}
 use log::{debug, info};
 use netnet::{Error::Stopped, Signal};
 use slint::{ComponentHandle, Weak};
-use std::net::{Ipv6Addr, TcpListener, TcpStream};
+use std::iter;
 use std::sync::{Arc, mpsc};
 use std::time::Instant;
-use std::{io, iter};
 use yuv::{
     BufferStoreMut, YuvBiPlanarImageMut, YuvChromaSubsampling, YuvConversionMode, YuvRange,
     YuvStandardMatrix,
 };
 
-use crate::common::{MAX_LATENCY, Packet, PacketStreams, SERVER_TCP_PORT};
+use crate::common::{MAX_LATENCY, Packet, SERVER_PORT};
 use crate::{App, setup_menu};
 
 // TODO: stop client/server video streams when Escape is pressed
@@ -44,29 +43,7 @@ fn bgra_to_yuv(bgra: &[u8], width: u32, height: u32, stride: u32) -> Vec<u8> {
     Vec::from_iter(iter::chain(y_plane, uv_plane))
 }
 
-fn create_tcp_stream(stop: Signal) -> netnet::Result<TcpStream> {
-    let listener = TcpListener::bind((Ipv6Addr::UNSPECIFIED, SERVER_TCP_PORT))?;
-    listener.set_nonblocking(true)?;
-    while !stop.get() {
-        match listener.accept() {
-            Ok((stream, _)) => return Ok(stream),
-            Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => continue,
-            Err(err) => return Err(err.into()),
-        }
-    }
-    Err(Stopped)
-}
-
-/// Returns `Ok(None)` if stop was signaled during the creation process.
-pub fn create_streams(stop: Signal) -> netnet::Result<PacketStreams> {
-    let mut tcp = create_tcp_stream(stop.clone())?;
-    info!("Created TCP stream");
-    let udp = netnet::create_stream_using_hole_punch(&mut tcp, MAX_LATENCY, stop)?;
-    info!("Created UDP stream");
-    Ok(udp)
-}
-
-fn start_screen_cast(device: Arc<VulkanDevice>, udp_sender: netnet::Sender<Packet>) {
+fn start_screen_cast(device: Arc<VulkanDevice>, net_sender: netnet::Sender) {
     let (frame_sender, frame_receiver) = mpsc::sync_channel(0);
 
     std::thread::spawn(move || {
@@ -133,12 +110,21 @@ fn start_screen_cast(device: Arc<VulkanDevice>, udp_sender: netnet::Sender<Packe
             );
 
             fps.tick();
-            debug!("Sending frame ({width}x{height}, {:.2} fps)", fps.avg(),);
-            udp_sender.send(Packet::H264Frame {
-                bytes: encoded.data,
-                width,
-                height,
-            });
+            debug!(
+                "Sending {} byte frame ({width}x{height}, {:.2} fps)",
+                encoded.data.len(),
+                fps.avg()
+            );
+            // max packet size - (sizeof(width) + sizeof(height) + sizeof(&[u8]))
+            for chunk in encoded.data.chunks(netnet::MAX_PACKET_SIZE - 20) {
+                let raw_packet = wincode::serialize(&Packet::H264 {
+                    bytes: chunk,
+                    width,
+                    height,
+                })
+                .unwrap();
+                net_sender.send(raw_packet).unwrap();
+            }
         }
     });
     info!("Started screen cast");
@@ -149,9 +135,11 @@ fn start(weak: Weak<App>, device: Arc<VulkanDevice>, stop_signal: Signal) -> any
     info!("Creating virtual keyboard (Enigo)");
     let mut enigo = Enigo::new(&Settings::default())?;
     info!("Spawning packet management thread");
+    info!("Creating packet server and waiting for client");
+    let net_receiver = netnet::create_server(SERVER_PORT, MAX_LATENCY, stop_signal, None)?;
     std::thread::spawn(move || {
         info!("Creating packet stream and waiting for client");
-        let (udp_sender, mut udp_receiver) = match create_streams(stop_signal) {
+        let net_sender = match net_receiver.accept() {
             Ok(ok) => ok,
             Err(Stopped) => {
                 info!("Stop signal sent while waiting for client connection");
@@ -162,10 +150,11 @@ fn start(weak: Weak<App>, device: Arc<VulkanDevice>, stop_signal: Signal) -> any
         weak.upgrade_in_event_loop(|app| app.set_client_connected(true))
             .unwrap();
         info!("Client connected");
-        start_screen_cast(device, udp_sender);
+        start_screen_cast(device, net_sender);
         info!("Screen cast started");
         loop {
-            let (Packet::Input(key), _timestamp) = udp_receiver.recv().unwrap() else {
+            let raw_packet = net_receiver.recv().unwrap();
+            let Packet::Input(key) = wincode::deserialize(&raw_packet.body).unwrap() else {
                 unreachable!();
             };
             debug!("Read {:?}", key);

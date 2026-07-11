@@ -14,7 +14,6 @@ log = "0.4.33"
 pretty_env_logger = "0.5.0"
 janck = { path = "../janck" }
 slint = { version = "1.17.0", features = ["unstable-wgpu-29", "renderer-femtovg-wgpu"] }
-chrono = "0.4.45"
 fps_ticker = "1.0.0"
 wincode = { version = "0.5.5", features = ["derive"] }
 netnet = { version = "0.1.0", path = "../netnet" }
@@ -26,7 +25,6 @@ rand = "0.10.2"
 # settings from https://doc.rust-lang.org/cargo/reference/profiles.html#release
 [profile.dev.package.janck]
 opt-level = 3
-# split-debuginfo = '...'  # Platform-specific.
 strip = "none"
 debug-assertions = false
 overflow-checks = false

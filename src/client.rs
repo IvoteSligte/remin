@@ -1,19 +1,13 @@
-use chrono::Utc;
 use gpu_video::{EncodedInputChunk, VulkanDevice, parameters::DecoderParameters};
 use log::{debug, info, warn};
-use netnet::Signal;
+use netnet::{Signal, since_micros};
 use slint::{ComponentHandle, SharedPixelBuffer, Weak};
-use std::{
-    io,
-    net::{SocketAddr, TcpStream},
-    sync::Arc,
-    time::Instant,
-};
+use std::{io, sync::Arc, time::Instant};
 use yuv::{YuvBiPlanarImage, YuvConversionMode, YuvRange, YuvStandardMatrix};
 
 use crate::{
     App,
-    common::{Action, Key, MAX_LATENCY, Packet, PacketStreams, SERVER_TCP_PORT},
+    common::{Action, Key, MAX_LATENCY, Packet, SERVER_PORT},
     parse_socket_address, setup_menu,
 };
 
@@ -40,26 +34,18 @@ fn yuv_to_rgba(yuv: &[u8], width: u32, height: u32, rgba: &mut [u8]) {
     .unwrap();
 }
 
-// TODO: check that the UDP client address is the same as the TCP client address
-fn create_streams(server_tcp_addr: SocketAddr, stop: Signal) -> netnet::Result<PacketStreams> {
-    let mut tcp = TcpStream::connect(server_tcp_addr)?;
-    info!("Created TCP stream");
-    let udp = netnet::create_stream_using_hole_punch(&mut tcp, MAX_LATENCY, stop)?;
-    info!("Created UDP stream");
-    Ok(udp)
-}
-
 fn start(
     weak: Weak<App>,
     device: Arc<VulkanDevice>,
     server_address: &str,
     stop_signal: Signal,
-) -> netnet::Result<netnet::Sender<Packet>> {
+) -> netnet::Result<netnet::Sender> {
     info!("Creating network connection");
-    // FIXME: parse fail (caused by empty server_ip) results in panic
-    let (udp_sender, mut udp_receiver) = create_streams(
-        parse_socket_address(server_address, SERVER_TCP_PORT)?,
+    let (net_sender, net_receiver) = netnet::create_client(
+        parse_socket_address(server_address, SERVER_PORT)?,
+        MAX_LATENCY,
         stop_signal,
+        None,
     )?;
     info!("Created network connection");
 
@@ -72,19 +58,22 @@ fn start(
         let fps = fps_ticker::Fps::default();
         let mut last_frame_instant = Instant::now();
         loop {
-            let (packet, timestamp) = udp_receiver.recv().unwrap();
+            let raw_packet = net_receiver.recv().unwrap();
+            let packet: Packet = wincode::deserialize(&raw_packet.body).unwrap();
             match packet {
                 Packet::Input(_) => unreachable!("Client should not receive input packets"),
-                Packet::H264Frame {
-                    bytes,
+                Packet::H264 {
                     width,
                     height,
+                    bytes,
                 } => {
-                    let now = Utc::now();
                     fps.tick();
                     debug!(
                         "Received frame from server ({:.2}ms latency, {:.2} fps, {width}x{height})",
-                        (now - timestamp).num_microseconds().unwrap() as f32 / 1000.0,
+                        since_micros(raw_packet.timestamp)
+                            .num_microseconds()
+                            .unwrap() as f32
+                            / 1000.0,
                         fps.avg(),
                     );
 
@@ -136,7 +125,7 @@ fn start(
             }
         }
     });
-    Ok(udp_sender)
+    Ok(net_sender)
 }
 
 pub fn setup(app: &App, device: Arc<VulkanDevice>) {
@@ -150,7 +139,7 @@ pub fn setup(app: &App, device: Arc<VulkanDevice>) {
             &server_address,
             stop_signal.clone(),
         ) {
-            Ok(udp_sender) => {
+            Ok(net_sender) => {
                 let app = weak.upgrade().unwrap();
                 let weak = app.as_weak();
                 let stop_signal2 = stop_signal.clone();
@@ -174,7 +163,8 @@ pub fn setup(app: &App, device: Arc<VulkanDevice>) {
                             Action::Release
                         },
                     });
-                    udp_sender.send(packet);
+                    let raw_packet = wincode::serialize(&packet).unwrap();
+                    net_sender.send(raw_packet).unwrap();
                 });
                 "".into()
             }
