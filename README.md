@@ -4,4 +4,4 @@ Forwards input from a friend also running Remin and shows them your screen, simi
 
 ## Requirements
 
-H.264 codec hardware support via Vulkan Video
+H.264 codec hardware support via Vulkan Video (this means no OS-X support).
