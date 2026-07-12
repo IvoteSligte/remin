@@ -1,7 +1,6 @@
 use enigo::{Enigo, Keyboard, Settings};
 use fps_ticker::Fps;
 use gpu_video::VulkanDevice;
-use gpu_video::parameters::{EncoderParametersH264, RateControl, VideoParameters};
 use log::{debug, info};
 use netnet::{Error::Stopped, Signal};
 use slint::{ComponentHandle, Weak};
@@ -14,14 +13,14 @@ use yuv::{
 };
 
 use crate::common::{MAX_LATENCY, Packet, SERVER_PORT};
-use crate::{App, setup_menu};
+use crate::{App, gpu, setup_menu};
 
 // TODO: stop client/server video streams when Escape is pressed
 // TODO: stop server input TCP stream when Escape is pressed
 // TODO: use frame timestamps
 
 // TODO: server UI element for adjusting these parameters
-const FRAME_RATE: u64 = 75;
+pub(crate) const FRAME_RATE: u64 = 75;
 
 fn bgra_to_yuv(bgra: &[u8], width: u32, height: u32, stride: u32) -> Vec<u8> {
     let mut image = YuvBiPlanarImageMut::alloc(width, height, YuvChromaSubsampling::Yuv420);
@@ -73,20 +72,7 @@ fn start_screen_cast(
             assert_eq!(format, janck::Format::Bgra8);
 
             if encoder.is_none() {
-                encoder = Some(
-                    device
-                        .create_bytes_encoder_h264(EncoderParametersH264 {
-                            input_parameters: VideoParameters {
-                                width: width.try_into().unwrap(),
-                                height: height.try_into().unwrap(),
-                                target_framerate: (FRAME_RATE as u32).into(),
-                            },
-                            output_parameters: device
-                                .encoder_output_parameters_h264_low_latency(RateControl::Disabled)
-                                .unwrap(),
-                        })
-                        .unwrap(),
-                );
+                encoder = Some(gpu::create_encoder(&device, width, height));
             }
             let encoder = encoder.as_mut().unwrap();
 
@@ -122,6 +108,7 @@ fn start_screen_cast(
                 fps.avg()
             );
             // max packet size - (sizeof(frame_timestamp) + sizeof(width) + sizeof(height) + sizeof(&[u8]))
+            // TODO: try to split on NAL unit boundary to prevent data loss caused by cutting a unit in half
             for chunk in encoded.data.chunks(netnet::MAX_PACKET_SIZE - 28) {
                 let raw_packet = wincode::serialize(&Packet::H264 {
                     frame_timestamp,

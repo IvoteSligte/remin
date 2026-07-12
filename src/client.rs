@@ -1,4 +1,4 @@
-use gpu_video::{EncodedInputChunk, VulkanDevice, parameters::DecoderParameters};
+use gpu_video::VulkanDevice;
 use log::{debug, info, warn};
 use netnet::{Signal, since_micros};
 use slint::{ComponentHandle, SharedPixelBuffer, Weak};
@@ -8,7 +8,7 @@ use yuv::{YuvBiPlanarImage, YuvConversionMode, YuvRange, YuvStandardMatrix};
 use crate::{
     App,
     common::{Action, Key, MAX_LATENCY, Packet, SERVER_PORT},
-    parse_socket_address, setup_menu,
+    gpu, parse_socket_address, setup_menu,
 };
 
 // TODO: determine if gpu_video can be used on non-nvidia GPUs (since it uses Nv12 as texture format instead of Yuv420)
@@ -51,9 +51,7 @@ fn start(
 
     std::thread::spawn(move || -> ! {
         info!("Started packet processing loop");
-        let mut decoder = device
-            .create_bytes_decoder_h264(DecoderParameters::default())
-            .unwrap();
+        let mut decoder = gpu::Decoder::new(device).unwrap();
 
         let fps = fps_ticker::Fps::default();
         let mut last_frame_instant = Instant::now();
@@ -64,25 +62,22 @@ fn start(
                 Packet::Input(_) => unreachable!("Client should not receive input packets"),
                 Packet::H264 {
                     frame_timestamp,
-                    width,
-                    height,
                     bytes,
+                    height: _,
+                    width: _,
                 } => {
                     let total_latency = since_micros(frame_timestamp);
                     let network_latency = since_micros(raw_packet.timestamp);
                     // decode to YUV frame and then to Slint image
                     let pre_decode = Instant::now();
-                    let yuv_frames = match decoder.decode(EncodedInputChunk {
-                        data: &bytes,
-                        pts: None, // TODO: synchronisation timestamp
-                    }) {
+                    let maybe_yuv_frame = match decoder.decode(&bytes) {
                         Ok(f) => f,
                         Err(err) => {
                             warn!("Failed to decode frame: {err}");
                             continue;
                         }
                     };
-                    let Some(yuv_frame) = yuv_frames.get(0) else {
+                    let Some(yuv_frame) = maybe_yuv_frame else {
                         warn!("Failed to decode H.264 frame");
                         continue;
                     };
@@ -94,11 +89,12 @@ fn start(
                         fps.avg(),
                     );
                     let pre_rgba = Instant::now();
-                    let mut rgba_buffer = SharedPixelBuffer::new(width, height);
+                    let mut rgba_buffer =
+                        SharedPixelBuffer::new(yuv_frame.data.width, yuv_frame.data.height);
                     yuv_to_rgba(
                         &yuv_frame.data.frame,
-                        width,
-                        height,
+                        yuv_frame.data.width,
+                        yuv_frame.data.height,
                         rgba_buffer.make_mut_bytes(),
                     );
                     let now = Instant::now();

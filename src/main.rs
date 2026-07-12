@@ -13,6 +13,7 @@ use slint::{ComponentHandle, Weak};
 mod client;
 mod common;
 mod server;
+mod gpu;
 
 slint::include_modules!();
 
