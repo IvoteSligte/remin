@@ -50,6 +50,7 @@ fn start_screen_cast(
     let video = janck::capture_video(FRAME_RATE)?;
 
     std::thread::spawn(move || {
+        // using a separate thread here means that a frame can be captured while another is being processed
         for frame in video {
             frame_sender.send(frame).unwrap();
         }
@@ -71,10 +72,8 @@ fn start_screen_cast(
             // TODO: support other formats
             assert_eq!(format, janck::Format::Bgra8);
 
-            if encoder.is_none() {
-                encoder = Some(gpu::create_encoder(&device, width, height));
-            }
-            let encoder = encoder.as_mut().unwrap();
+            let encoder =
+                encoder.get_or_insert_with(|| gpu::create_encoder(&device, width, height));
 
             // Encode frame to H.264
             let pre_yuv = Instant::now();
@@ -109,7 +108,6 @@ fn start_screen_cast(
             );
             // max packet size - (sizeof(frame_timestamp) + sizeof(width) + sizeof(height) + sizeof(&[u8]))
             // TODO: try to split on NAL unit boundary to prevent data loss caused by cutting a unit in half
-            //       (unless gpu_video/hardware accounts for this?)
             for chunk in encoded.data.chunks(netnet::MAX_PACKET_SIZE - 28) {
                 let raw_packet = wincode::serialize(&Packet::H264 {
                     frame_timestamp,

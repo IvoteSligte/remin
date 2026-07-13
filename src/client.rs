@@ -43,13 +43,10 @@ fn start(
                     height: _,
                     width: _,
                 } => {
-                    let total_latency = since_micros(frame_timestamp);
-                    let network_latency = since_micros(raw_packet.timestamp);
                     fps.tick();
                     debug!(
-                        "Received frame from server (latency: {:.2}ms network, {:.2}ms total; {:.2} fps)",
-                        network_latency.num_microseconds().unwrap() as f32 / 1000.0,
-                        total_latency.num_microseconds().unwrap() as f32 / 1000.0,
+                        "Received frame from server (latency: {:.2}ms total; {:.2} fps)",
+                        since_micros(frame_timestamp).num_microseconds().unwrap() as f32 / 1000.0,
                         fps.avg(),
                     );
                     // decode to YUV frame and then to Slint image
