@@ -108,7 +108,7 @@ fn start(weak: Weak<App>, device: Arc<VulkanDevice>, stop_signal: Signal) -> any
             let Packet::Input(key) = wincode::deserialize(&raw_packet.body).unwrap() else {
                 unreachable!();
             };
-            debug!("Read {:?}", key);
+            info!("Read {:?}", key);
             enigo
                 .key(enigo::Key::Unicode(key.char), key.action.into())
                 .unwrap();

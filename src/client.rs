@@ -122,7 +122,7 @@ pub fn setup(app: &App, device: Arc<VulkanDevice>, queue: wgpu::Queue) {
                     let Some(char) = text.chars().next() else {
                         return;
                     };
-                    debug!("Key {}: '{}'", action, char);
+                    info!("Key {}: '{}'", action, char);
                     let packet = Packet::Input(Key {
                         char,
                         action: if action == "pressed" {
