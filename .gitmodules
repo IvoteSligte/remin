@@ -1,0 +1,9 @@
+[submodule "janck"]
+	path = janck
+	url = ./janck
+[submodule "netnet"]
+	path = netnet
+	url = ./netnet
+[submodule "vk-mem-rs"]
+	path = vk-mem-rs
+	url = ./vk-mem-rs
