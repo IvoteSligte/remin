@@ -28,6 +28,9 @@ component FormField inherits VerticalLayout {
 }
 
 export component App inherits Window {
+    preferred-width: 800px;
+    preferred-height: 600px;
+    
     property <string> view: "menu";
     in property <image> video-frame <=> video-display.source;
 
