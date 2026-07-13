@@ -1,9 +1,8 @@
 use gpu_video::VulkanDevice;
 use log::{debug, info, warn};
 use netnet::{Signal, since_micros};
-use slint::{ComponentHandle, SharedPixelBuffer, Weak};
+use slint::{ComponentHandle, Weak};
 use std::{io, sync::Arc, time::Instant};
-use yuv::{YuvBiPlanarImage, YuvConversionMode, YuvRange, YuvStandardMatrix};
 
 use crate::{
     App,
@@ -11,32 +10,10 @@ use crate::{
     gpu, parse_socket_address, setup_menu,
 };
 
-// TODO: determine if gpu_video can be used on non-nvidia GPUs (since it uses Nv12 as texture format instead of Yuv420)
-
-fn yuv_to_rgba(yuv: &[u8], width: u32, height: u32, rgba: &mut [u8]) {
-    let (y_plane, uv_plane) = yuv.split_at((width * height) as _);
-    let image = YuvBiPlanarImage {
-        y_plane,
-        y_stride: width,
-        uv_plane,
-        uv_stride: width, // based on Yuv420 format
-        width,
-        height,
-    };
-    yuv::yuv_nv12_to_rgba(
-        &image,
-        rgba,
-        width * 4,
-        YuvRange::Full,
-        YuvStandardMatrix::Bt709,
-        YuvConversionMode::Balanced,
-    )
-    .unwrap();
-}
-
 fn start(
     weak: Weak<App>,
     device: Arc<VulkanDevice>,
+    queue: wgpu::Queue,
     server_address: &str,
     stop_signal: Signal,
 ) -> netnet::Result<netnet::Sender> {
@@ -51,7 +28,7 @@ fn start(
 
     std::thread::spawn(move || -> ! {
         info!("Started packet processing loop");
-        let mut decoder = gpu::Decoder::new(device).unwrap();
+        let mut decoder = gpu::Decoder::new(device, queue, weak).unwrap();
 
         let fps = fps_ticker::Fps::default();
         let mut last_frame_instant = Instant::now();
@@ -68,19 +45,6 @@ fn start(
                 } => {
                     let total_latency = since_micros(frame_timestamp);
                     let network_latency = since_micros(raw_packet.timestamp);
-                    // decode to YUV frame and then to Slint image
-                    let pre_decode = Instant::now();
-                    let maybe_yuv_frame = match decoder.decode(&bytes) {
-                        Ok(f) => f,
-                        Err(err) => {
-                            warn!("Failed to decode frame: {err}");
-                            continue;
-                        }
-                    };
-                    let Some(yuv_frame) = maybe_yuv_frame else {
-                        warn!("Failed to decode H.264 frame");
-                        continue;
-                    };
                     fps.tick();
                     debug!(
                         "Received frame from server (latency: {:.2}ms network, {:.2}ms total; {:.2} fps)",
@@ -88,21 +52,22 @@ fn start(
                         total_latency.num_microseconds().unwrap() as f32 / 1000.0,
                         fps.avg(),
                     );
-                    let pre_rgba = Instant::now();
-                    let mut rgba_buffer =
-                        SharedPixelBuffer::new(yuv_frame.data.width, yuv_frame.data.height);
-                    yuv_to_rgba(
-                        &yuv_frame.data.frame,
-                        yuv_frame.data.width,
-                        yuv_frame.data.height,
-                        rgba_buffer.make_mut_bytes(),
-                    );
-                    let now = Instant::now();
+                    // decode to YUV frame and then to Slint image
+                    let pre_decode = Instant::now();
+                    match decoder.decode(&bytes) {
+                        Ok(()) => (),
+                        Err(gpu::DecoderError::NoNewFrame) => {
+                            debug!("Not enough frame data to construct a new frame");
+                            continue;
+                        }
+                        Err(err) => {
+                            warn!("Failed to decode frame: {err}");
+                            continue;
+                        }
+                    }
                     debug!(
-                        "Decoding frame took {:.2}ms ({:.2}ms decoding, {:.2}ms RGBA conversion)",
-                        (now - pre_decode).as_micros() as f32 / 1000.0,
-                        (pre_rgba - pre_decode).as_micros() as f32 / 1000.0,
-                        (now - pre_rgba).as_micros() as f32 / 1000.0,
+                        "Decoding frame took {:.2}ms",
+                        (Instant::now() - pre_decode).as_micros() as f32 / 1000.0,
                     );
 
                     let now = Instant::now();
@@ -111,16 +76,10 @@ fn start(
                         (now - last_frame_instant).as_micros() as f32 / 1000.0
                     );
                     last_frame_instant = now;
-
-                    weak.upgrade_in_event_loop(move |app| {
-                        app.set_video_frame(slint::Image::from_rgba8(rgba_buffer));
-                        debug!(
-                            "Total frame latency: {:.2}ms",
-                            since_micros(frame_timestamp).num_microseconds().unwrap() as f32
-                                / 1000.0
-                        );
-                    })
-                    .unwrap();
+                    debug!(
+                        "Total frame latency: {:.2}ms",
+                        since_micros(frame_timestamp).num_microseconds().unwrap() as f32 / 1000.0
+                    );
                 }
             }
         }
@@ -128,7 +87,7 @@ fn start(
     Ok(net_sender)
 }
 
-pub fn setup(app: &App, device: Arc<VulkanDevice>) {
+pub fn setup(app: &App, device: Arc<VulkanDevice>, queue: wgpu::Queue) {
     let weak = app.as_weak();
 
     app.on_start_client(move |server_address| {
@@ -136,6 +95,7 @@ pub fn setup(app: &App, device: Arc<VulkanDevice>) {
         match start(
             weak.clone(),
             device.clone(),
+            queue.clone(),
             &server_address,
             stop_signal.clone(),
         ) {

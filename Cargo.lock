@@ -4748,6 +4748,8 @@ dependencies = [
  "rand 0.10.2",
  "slint",
  "slint-build",
+ "thiserror 2.0.18",
+ "wgpu",
  "wincode",
  "yuv",
 ]

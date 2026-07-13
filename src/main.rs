@@ -77,7 +77,7 @@ fn main() {
     app.on_is_socket_address(|text| parse_socket_address(&text, 0).is_ok());
     setup_menu(&app.as_weak());
     server::setup(&app, device.clone());
-    client::setup(&app, device.clone());
+    client::setup(&app, device.clone(), device.wgpu_queue());
     info!("Running app");
     app.run().unwrap();
 }

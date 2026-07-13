@@ -18,6 +18,9 @@ wincode = { version = "0.5.5", features = ["derive"] }
 gpu-video = "0.4.0"
 yuv = "0.8.16"
 rand = "0.10.2"
+# wpgu version must be synchronised with slint unstable-wgpu-* feature and gpu-video's wgpu version
+wgpu = "29.0.0"
+thiserror = "2.0.18"
 
 # TODO: use their git repositories once the modifications have slowed down
 janck = { path = "../janck" }

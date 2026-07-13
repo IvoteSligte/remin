@@ -20,7 +20,7 @@ use crate::{App, gpu, setup_menu};
 // TODO: use frame timestamps
 
 // TODO: server UI element for adjusting these parameters
-pub(crate) const FRAME_RATE: u64 = 75;
+pub(crate) const FRAME_RATE: u64 = 60;
 
 fn bgra_to_yuv(bgra: &[u8], width: u32, height: u32, stride: u32) -> Vec<u8> {
     let mut image = YuvBiPlanarImageMut::alloc(width, height, YuvChromaSubsampling::Yuv420);
@@ -28,7 +28,7 @@ fn bgra_to_yuv(bgra: &[u8], width: u32, height: u32, stride: u32) -> Vec<u8> {
         &mut image,
         bgra,
         stride,
-        YuvRange::Full,
+        YuvRange::Limited,
         YuvStandardMatrix::Bt709,
         YuvConversionMode::Balanced,
     )
@@ -109,6 +109,7 @@ fn start_screen_cast(
             );
             // max packet size - (sizeof(frame_timestamp) + sizeof(width) + sizeof(height) + sizeof(&[u8]))
             // TODO: try to split on NAL unit boundary to prevent data loss caused by cutting a unit in half
+            //       (unless gpu_video/hardware accounts for this?)
             for chunk in encoded.data.chunks(netnet::MAX_PACKET_SIZE - 28) {
                 let raw_packet = wincode::serialize(&Packet::H264 {
                     frame_timestamp,
