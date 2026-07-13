@@ -28,7 +28,7 @@ fn start(
 
     std::thread::spawn(move || -> ! {
         info!("Started packet processing loop");
-        let mut decoder = gpu::Decoder::new(device, queue, weak).unwrap();
+        let mut decoder = None;
 
         let fps = fps_ticker::Fps::default();
         let mut last_frame_instant = Instant::now();
@@ -40,8 +40,8 @@ fn start(
                 Packet::H264 {
                     frame_timestamp,
                     bytes,
-                    height: _,
-                    width: _,
+                    width,
+                    height,
                 } => {
                     fps.tick();
                     debug!(
@@ -49,9 +49,20 @@ fn start(
                         since_micros(frame_timestamp).num_microseconds().unwrap() as f32 / 1000.0,
                         fps.avg(),
                     );
-                    // decode to YUV frame and then to Slint image
                     let pre_decode = Instant::now();
-                    match decoder.decode(&bytes) {
+                    match decoder
+                        .get_or_insert_with(|| {
+                            gpu::Decoder::new(
+                                device.clone(),
+                                queue.clone(),
+                                weak.clone(),
+                                width,
+                                height,
+                            )
+                            .unwrap()
+                        })
+                        .decode(&bytes)
+                    {
                         Ok(()) => (),
                         Err(gpu::DecoderError::NoNewFrame) => {
                             debug!("Not enough frame data to construct a new frame");

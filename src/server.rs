@@ -4,13 +4,8 @@ use gpu_video::VulkanDevice;
 use log::{debug, info};
 use netnet::{Error::Stopped, Signal};
 use slint::{ComponentHandle, Weak};
-use std::iter;
 use std::sync::{Arc, mpsc};
 use std::time::Instant;
-use yuv::{
-    BufferStoreMut, YuvBiPlanarImageMut, YuvChromaSubsampling, YuvConversionMode, YuvRange,
-    YuvStandardMatrix,
-};
 
 use crate::common::{MAX_LATENCY, Packet, SERVER_PORT};
 use crate::{App, gpu, setup_menu};
@@ -20,27 +15,8 @@ use crate::{App, gpu, setup_menu};
 // TODO: use frame timestamps
 
 // TODO: server UI element for adjusting these parameters
+// TODO: resolution downscaling and frame rate reduction according to the client's monitor
 pub(crate) const FRAME_RATE: u64 = 60;
-
-fn bgra_to_yuv(bgra: &[u8], width: u32, height: u32, stride: u32) -> Vec<u8> {
-    let mut image = YuvBiPlanarImageMut::alloc(width, height, YuvChromaSubsampling::Yuv420);
-    yuv::bgra_to_yuv_nv12(
-        &mut image,
-        bgra,
-        stride,
-        YuvRange::Limited,
-        YuvStandardMatrix::Bt709,
-        YuvConversionMode::Balanced,
-    )
-    .unwrap();
-    let BufferStoreMut::Owned(y_plane) = image.y_plane else {
-        unreachable!();
-    };
-    let BufferStoreMut::Owned(uv_plane) = image.uv_plane else {
-        unreachable!();
-    };
-    Vec::from_iter(iter::chain(y_plane, uv_plane))
-}
 
 fn start_screen_cast(
     device: Arc<VulkanDevice>,
@@ -69,46 +45,27 @@ fn start_screen_cast(
             format,
         } in frame_receiver
         {
-            // TODO: support other formats
-            assert_eq!(format, janck::Format::Bgra8);
-
-            let encoder =
-                encoder.get_or_insert_with(|| gpu::create_encoder(&device, width, height));
+            let encoder = encoder
+                .get_or_insert_with(|| gpu::Encoder::new(&device, width, height, stride, format));
 
             // Encode frame to H.264
-            let pre_yuv = Instant::now();
-            let yuv_frame = bgra_to_yuv(&bytes, width, height, stride);
             let pre_encode = Instant::now();
-            let encoded = encoder
-                .encode(
-                    &gpu_video::InputFrame {
-                        data: gpu_video::RawFrameData {
-                            frame: yuv_frame,
-                            width,
-                            height,
-                        },
-                        pts: None, // TODO: synchronisation timestamp (once there is audio)
-                    },
-                    false,
-                )
-                .unwrap();
+            let encoded = encoder.encode(&bytes).unwrap();
             let now = Instant::now();
             debug!(
-                "Encoding frame took {:.2}ms ({:.2}ms YUV conversion, {:.2}ms GPU encoding)",
-                (now - pre_yuv).as_micros() as f32 / 1000.0,
-                (pre_encode - pre_yuv).as_micros() as f32 / 1000.0,
+                "Encoding frame took {:.2}ms",
                 (now - pre_encode).as_micros() as f32 / 1000.0,
             );
 
             fps.tick();
             debug!(
                 "Sending {} byte frame ({width}x{height}, {:.2} fps)",
-                encoded.data.len(),
+                encoded.len(),
                 fps.avg()
             );
             // max packet size - (sizeof(frame_timestamp) + sizeof(width) + sizeof(height) + sizeof(&[u8]))
             // TODO: try to split on NAL unit boundary to prevent data loss caused by cutting a unit in half
-            for chunk in encoded.data.chunks(netnet::MAX_PACKET_SIZE - 28) {
+            for chunk in encoded.chunks(netnet::MAX_PACKET_SIZE - 28) {
                 let raw_packet = wincode::serialize(&Packet::H264 {
                     frame_timestamp,
                     bytes: chunk,
