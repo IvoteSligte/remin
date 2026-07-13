@@ -16,14 +16,14 @@ use crate::{App, gpu, setup_menu};
 
 // TODO: server UI element for adjusting these parameters
 // TODO: resolution downscaling and frame rate reduction according to the client's monitor
-pub(crate) const FRAME_RATE: u64 = 60;
+pub(crate) const FRAME_RATE: u32 = 60;
 
 fn start_screen_cast(
     device: Arc<VulkanDevice>,
     net_sender: netnet::Sender,
 ) -> Result<(), janck::Error> {
     let (frame_sender, frame_receiver) = mpsc::sync_channel::<janck::Frame>(0);
-    let video = janck::capture_video(FRAME_RATE)?;
+    let video = janck::capture_video(FRAME_RATE as _)?;
 
     std::thread::spawn(move || {
         // using a separate thread here means that a frame can be captured while another is being processed
@@ -46,7 +46,7 @@ fn start_screen_cast(
         } in frame_receiver
         {
             let encoder = encoder.get_or_insert_with(|| {
-                gpu::Encoder::new(&device, width, height, stride, format).unwrap()
+                gpu::Encoder::new(&device, width, height, stride, format, FRAME_RATE).unwrap()
             });
             // Encode frame to H.264
             let pre_encode = Instant::now();
