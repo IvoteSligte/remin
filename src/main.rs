@@ -47,20 +47,16 @@ fn parse_socket_address(text: &str, default_port: u16) -> io::Result<SocketAddr>
     })
 }
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     pretty_env_logger::init();
 
     // TODO: integrate Slint's preferred options for creating instance, adapter, device, and queue
     info!("Creating Vulkan instance");
-    let instance = VulkanInstance::new().unwrap();
+    let instance = VulkanInstance::new()?;
     info!("Creating Vulkan adapter");
-    let adapter = instance
-        .create_adapter(&VulkanAdapterDescriptor::default())
-        .unwrap();
+    let adapter = instance.create_adapter(&VulkanAdapterDescriptor::default())?;
     info!("Creating Vulkan device");
-    let device = adapter
-        .create_device(&VulkanDeviceDescriptor::default())
-        .unwrap();
+    let device = adapter.create_device(&VulkanDeviceDescriptor::default())?;
     info!("Creating Slint backend from Vulkan objects");
     slint::BackendSelector::new()
         .require_wgpu_29(slint::wgpu_29::WGPUConfiguration::Manual {
@@ -69,15 +65,15 @@ fn main() {
             device: device.wgpu_device(),
             queue: device.wgpu_queue(),
         })
-        .select()
-        .unwrap();
+        .select()?;
     info!("Creating app");
 
-    let app = App::new().unwrap();
+    let app = App::new()?;
     app.on_is_socket_address(|text| parse_socket_address(&text, 0).is_ok());
     setup_menu(&app.as_weak());
     server::setup(&app, device.clone());
     client::setup(&app, device.clone(), device.wgpu_queue());
     info!("Running app");
-    app.run().unwrap();
+    app.run()?;
+    Ok(())
 }
