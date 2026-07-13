@@ -45,9 +45,9 @@ fn start_screen_cast(
             format,
         } in frame_receiver
         {
-            let encoder = encoder
-                .get_or_insert_with(|| gpu::Encoder::new(&device, width, height, stride, format));
-
+            let encoder = encoder.get_or_insert_with(|| {
+                gpu::Encoder::new(&device, width, height, stride, format).unwrap()
+            });
             // Encode frame to H.264
             let pre_encode = Instant::now();
             let encoded = encoder.encode(&bytes).unwrap();

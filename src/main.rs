@@ -12,8 +12,8 @@ use slint::{ComponentHandle, Weak};
 
 mod client;
 mod common;
-mod server;
 mod gpu;
+mod server;
 
 slint::include_modules!();
 
@@ -53,15 +53,15 @@ fn main() {
     // TODO: integrate Slint's preferred options for creating instance, adapter, device, and queue
     info!("Creating Vulkan instance");
     let instance = VulkanInstance::new().unwrap();
-    info!("Creating Vulkan adapter");    
+    info!("Creating Vulkan adapter");
     let adapter = instance
         .create_adapter(&VulkanAdapterDescriptor::default())
         .unwrap();
-    info!("Creating Vulkan device");    
+    info!("Creating Vulkan device");
     let device = adapter
         .create_device(&VulkanDeviceDescriptor::default())
         .unwrap();
-    info!("Creating Slint backend from Vulkan objects");    
+    info!("Creating Slint backend from Vulkan objects");
     slint::BackendSelector::new()
         .require_wgpu_29(slint::wgpu_29::WGPUConfiguration::Manual {
             instance: instance.wgpu_instance(),
@@ -71,7 +71,7 @@ fn main() {
         })
         .select()
         .unwrap();
-    info!("Creating app");        
+    info!("Creating app");
 
     let app = App::new().unwrap();
     app.on_is_socket_address(|text| parse_socket_address(&text, 0).is_ok());
