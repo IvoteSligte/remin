@@ -80,11 +80,15 @@ fn on_connect(
         weak.upgrade_in_event_loop(move |app| {
             app.on_share_screen(move || {
                 info!("Starting caster");
-                let Vars {
+                let Some(Vars {
                     device,
                     net_sender,
                     net_receiver,
-                } = vars.lock().unwrap().take().unwrap();
+                }) = vars.lock().unwrap().take()
+                else {
+                    // FIXME: on double click this is triggered, which means the error is also cleared...
+                    return "".into();
+                };
                 info!("Acquired variables");
                 match caster::start(device, net_sender, net_receiver) {
                     Ok(()) => "".into(),
@@ -143,8 +147,10 @@ fn main() -> anyhow::Result<()> {
     let weak = app.as_weak();
     let weak2 = app.as_weak();
 
+    // TODO: show failure in GUI?
+    nettime::sync_time()?;
+
     app.on_start_server(move || {
-        nettime::sync_time().unwrap();
         let stop_signal = Signal::new();
         let device = device.clone();
         match net::connect_server(weak.clone(), stop_signal, on_connect(weak.clone(), device)) {
@@ -155,7 +161,7 @@ fn main() -> anyhow::Result<()> {
     app.on_start_client(move |server_addr_str| {
         match parse_socket_address(&server_addr_str, SERVER_PORT) {
             Ok(server_addr) => {
-                nettime::sync_time().unwrap();
+                // TODO: handle errors instead of unwrapping
                 let stop_signal = Signal::new();
                 let device = device2.clone();
                 match net::connect_client(

@@ -94,7 +94,7 @@ pub fn start_input_handler(app: &App, net_sender: netnet::Sender) {
         let Some(char) = text.chars().next() else {
             return;
         };
-        info!("Key {}: '{}'", action, char);
+        info!("Key {}: '{}' = {}", action, char, char as u32);
         let packet = Packet::Input(Key {
             char,
             action: if action == "pressed" {

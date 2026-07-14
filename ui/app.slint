@@ -66,13 +66,19 @@ export component App inherits Window {
         }
 
         key-pressed(event) => {
-            if (view == "viewer" && !event.modifiers.meta && !event.modifiers.alt && event.text != "") {
+            // if (view == "viewer" && !event.modifiers.meta && !event.modifiers.alt && event.text != "") {
+            //     root.keyboard-input(event.text, "pressed");
+            // }
+            if (view == "viewer") {
                 root.keyboard-input(event.text, "pressed");
             }
             accept
         }
         key-released(event) => {
-            if (view == "viewer" && !event.modifiers.meta && !event.modifiers.alt && event.text != "") {
+            // if (view == "viewer" && !event.modifiers.meta && !event.modifiers.alt && event.text != "") {
+            //     root.keyboard-input(event.text, "released");
+            // }
+            if (view == "viewer") {
                 root.keyboard-input(event.text, "released");
             }
             accept
