@@ -121,6 +121,7 @@ pub fn setup(app: &App, device: Arc<VulkanDevice>) {
     let weak = app.as_weak();
 
     app.on_start_server(move || {
+        nettime::sync_time().unwrap();
         let stop_signal = Signal::new();
         match start(weak.clone(), device.clone(), stop_signal.clone()) {
             Ok(()) => {

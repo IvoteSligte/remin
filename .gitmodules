@@ -7,3 +7,6 @@
 [submodule "vk-mem-rs"]
 	path = vk-mem-rs
 	url = ./vk-mem-rs
+[submodule "nettime"]
+	path = nettime
+	url = ./nettime

@@ -99,6 +99,7 @@ pub fn setup(app: &App, device: Arc<VulkanDevice>, queue: wgpu::Queue) {
     let weak = app.as_weak();
 
     app.on_start_client(move |server_address| {
+        nettime::sync_time().unwrap();
         let stop_signal = Signal::new();
         match start(
             weak.clone(),
