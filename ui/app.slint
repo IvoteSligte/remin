@@ -1,149 +1,117 @@
-import { Button, LineEdit } from "std-widgets.slint";
-
-component FormField inherits VerticalLayout {
-    in property placeholder-text <=> input.placeholder-text;
-    in property input-type <=> input.input-type;
-    out property text <=> input.text;
-
-    in-out property <string> error: "";
-    callback validate(string) -> string;
-
-    public function ok() -> bool {
-        return error == "";
-    }
-
-    alignment: center;
-
-    input := LineEdit {
-        height: 65%;
-        edited(text) => {
-            error = validate(text);
-        }
-    }
-
-    Text {
-        height: 35%;
-        text: error;
-    }
-}
+import { Menu } from "./menu.slint";
+import { Button } from "std-widgets.slint";
+import { FormLayout, FormSubmitButton } from "form.slint";
 
 export component App inherits Window {
     preferred-width: 800px;
     preferred-height: 600px;
-    
-    property <string> view: "menu";
-    in property <image> video-frame <=> video-display.source;
 
-    pure callback is-port(s: string) -> bool;
+    // Enables specific components in a mutually exclusive manner
+    // Options: "menu" | "share-screen-menu" | "caster" | "viewer"
+    //
+    // NOTE: currently this is public so that Rust code can set view to "viewer",
+    // but should that be handled through callbacks instead?
+    in-out property <string> view: "menu";
+
+    // main menu
     callback start-server() -> string;
     callback start-client(server-ip: string) -> string;
+    pure callback is-socket-address(address: string) -> bool;
 
-    if view == "menu": HorizontalLayout {
-        alignment: center;
-
-        server-form := VerticalLayout {
-            private property <string> error: "";
-
-            alignment: center;
-            width: 40%;
-            spacing: 5px;
-
-            Button {
-                text: "Start Server";
-                height: 5%;
-                clicked => {
-                    error = start-server();
-                    if (error == "") {
-                        root.view = "server";
-                    }
-                }
-            }
-
-            if (error != ""): Text {
-                text: error;
-            }
-        }
-
-        Rectangle {
-            width: 7%;
-        }
-
-        client-form := VerticalLayout {
-            private property <string> error: "";
-
-            alignment: center;
-            width: 40%;
-            spacing: 5px;
-
-            server-ip-field := FormField {
-                height: 7%;
-                width: 50%;
-                placeholder-text: "Enter server address (e.g. 192.168.1.1)";
-                validate(text) => is-socket-address(text) ? "" : "Invalid address";
-            }
-
-            Button {
-                height: 5%;
-                text: "Start Client";
-                clicked => {
-                    error = "";
-                    if (server-ip-field.ok()) {
-                        error = start-client(server-ip-field.text);
-                        if (error == "") {
-                            root.view = "client";
-                        }
-                    }
-                }
-            }
-
-            Text {
-                text: error;
-            }
-        }
-    }
+    // input
     callback keyboard-input(key: string, action: string);
     callback escape();
-    pure callback is-socket-address(address: string) -> bool;
+
+    // caster/viewer menu
+    in property <bool> connected: false;
+    callback share-screen() -> string;
+
+    // viewer
+    in property <image> video-frame <=> viewer.source;
+
+    if view == "menu": Menu {
+        start-server() => {
+            let error = root.start-server();
+            if (error == "") {
+                root.view = "share-screen-menu";
+            }
+            error
+        }
+        start-client(server-ip) => {
+            let error = root.start-client(server-ip);
+            if (error == "") {
+                root.view = "share-screen-menu";
+            }
+            error
+        }
+        is-socket-address(address) => root.is-socket-address(address);
+    }
+
     forward-focus: scope;
 
     scope := FocusScope {
+        width: 100%;
+        height: 100%;
+
         KeyBinding {
             keys: @keys(Escape);
             activated => {
                 escape();
-                root.view = "menu";
+                if (root.view == "menu") {
+                    root.close();
+                } else {
+                    root.view = "menu";
+                }
             }
         }
 
         key-pressed(event) => {
-            if (view == "client" && !event.modifiers.meta && !event.modifiers.alt && event.text != "") {
+            if (view == "viewer" && !event.modifiers.meta && !event.modifiers.alt && event.text != "") {
                 root.keyboard-input(event.text, "pressed");
             }
             accept
         }
         key-released(event) => {
-            if (view == "client" && !event.modifiers.meta && !event.modifiers.alt && event.text != "") {
+            if (view == "viewer" && !event.modifiers.meta && !event.modifiers.alt && event.text != "") {
                 root.keyboard-input(event.text, "released");
             }
             accept
         }
     }
 
-    in property <bool> client-connected: false;
-
-    VerticalLayout {
-        visible: view == "server";
-
+    if (!connected && view != "menu"): VerticalLayout {
         VerticalLayout {
             Text {
-                text: client-connected ? "Client connected." : "Waiting for client connection...";
+                text: "Waiting for connection...";
+            }
+        }
+    }
+
+    if (view == "share-screen-menu" && connected): FormLayout {
+        FormSubmitButton {
+            text: "Share Screen";
+            validate() => true;
+            submit() => {
+                let error = share-screen();
+                if (error == "") {
+                    root.view = "caster";
+                }
+                error
+            }
+        }
+    }
+
+    if (view == "caster" && connected): VerticalLayout {
+        VerticalLayout {
+            Text {
+                text: "Sharing screen";
             }
         }
     }
 
     VerticalLayout {
-        visible: view == "client";
+        visible: view == "viewer" && connected;
 
-        video-display := Image { }
+        viewer := Image { }
     }
 }

@@ -1,0 +1,59 @@
+import { Button, LineEdit } from "std-widgets.slint";
+
+export component FormField inherits VerticalLayout {
+    in property placeholder-text <=> input.placeholder-text;
+    in property input-type <=> input.input-type;
+    out property text <=> input.text;
+
+    in-out property <string> error: "";
+    callback validate(string) -> string;
+
+    public function is-valid() -> bool {
+        return error == "";
+    }
+
+    alignment: center;
+
+    input := LineEdit {
+        height: 65%;
+        edited(text) => {
+            error = validate(text);
+        }
+    }
+
+    Text {
+        height: 35%;
+        text: error;
+    }
+}
+
+export component FormSubmitButton inherits VerticalLayout {
+    private property <string> error: "";
+    in property text <=> button.text;
+
+    callback validate() -> bool;
+    callback submit() -> string;
+
+    button := Button {
+        height: 5%;
+        text: "Submit";
+
+        clicked => {
+            error = "";
+            if (validate()) {
+                error = submit();
+            }
+        }
+    }
+
+    Text {
+        text: error;
+    }
+}
+
+
+export component FormLayout inherits VerticalLayout {
+    alignment: center;
+    width: 40%;
+    spacing: 5px;
+}

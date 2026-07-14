@@ -1,0 +1,35 @@
+import { FormSubmitButton, FormLayout, FormField } from "form.slint";
+
+export component Menu inherits HorizontalLayout {
+    alignment: center;
+
+    callback start-server() -> string;
+    callback start-client(server-ip: string) -> string;
+    pure callback is-socket-address(text: string) -> bool;
+
+    FormLayout {
+        FormSubmitButton {
+            text: "Host";
+            validate => { true };
+            submit => { start-server() };
+        }
+    }
+
+    Rectangle {
+        width: 7%;
+    }
+
+    FormLayout {
+        server-ip-field := FormField {
+            height: 7%;
+            placeholder-text: "Enter server address (e.g. 192.168.1.1)";
+            validate(text) => is-socket-address(text) ? "" : "Invalid address";
+        }
+
+        FormSubmitButton {
+            text: "Connect";
+            validate() => server-ip-field.is-valid();
+            submit() => start-client(server-ip-field.text);
+        }
+    }
+}

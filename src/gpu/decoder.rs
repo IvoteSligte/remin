@@ -55,6 +55,7 @@ impl Decoder {
             },
         )?;
         info!("Creating RGBA video frame texture");
+        // TODO: double-buffering?
         let rgba_texture = create_texture(
             &wgpu_device,
             width,
@@ -75,6 +76,8 @@ impl Decoder {
                             if let Some(app) = weak_app2.upgrade() {
                                 trace!("Redrawing window");
                                 in_use_signal2.set();
+                                // It is necessary to request a redraw because Slint is
+                                // not aware of us changing the video frame image
                                 app.window().request_redraw();
                             }
                         }

@@ -3,7 +3,7 @@ use netnet::TimeDelta;
 use wincode::{SchemaRead, SchemaWrite};
 
 pub const SERVER_PORT: u16 = 8084;
-pub const MAX_LATENCY: TimeDelta = TimeDelta::milliseconds(10000); // TODO: reset to 100
+pub const MAX_LATENCY: TimeDelta = TimeDelta::milliseconds(100);
 
 #[repr(u8)]
 #[derive(Debug, SchemaRead, SchemaWrite)]

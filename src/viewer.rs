@@ -1,35 +1,28 @@
 use gpu_video::VulkanDevice;
 use log::{debug, info, warn};
-use netnet::{Signal, since_micros};
-use slint::{ComponentHandle, Weak};
-use std::{io, sync::Arc, time::Instant};
+use netnet::since_micros;
+use slint::Weak;
+use std::{sync::Arc, time::Instant};
 
 use crate::{
     App,
-    common::{Action, Key, MAX_LATENCY, Packet, SERVER_PORT},
-    gpu, parse_socket_address, setup_menu,
+    common::{Action, Key, Packet},
+    gpu,
 };
 
-fn start(
+pub fn start_renderer(
     weak: Weak<App>,
     device: Arc<VulkanDevice>,
-    queue: wgpu::Queue,
-    server_address: &str,
-    stop_signal: Signal,
-) -> netnet::Result<netnet::Sender> {
-    info!("Creating network connection");
-    let (net_sender, net_receiver) = netnet::create_client(
-        parse_socket_address(server_address, SERVER_PORT)?,
-        MAX_LATENCY,
-        stop_signal,
-        None,
-    )?;
-    info!("Created network connection");
+    net_receiver: netnet::Receiver,
+) -> anyhow::Result<()> {
+    info!("Started packet processing loop");
+    let mut decoder = None;
 
-    std::thread::spawn(move || -> ! {
-        info!("Started packet processing loop");
-        let mut decoder = None;
+    weak.upgrade_in_event_loop(|app| {
+        app.set_view("viewer".into());
+    })?;
 
+    std::thread::spawn(move || {
         let fps = fps_ticker::Fps::default();
         let mut last_frame_instant = Instant::now();
         loop {
@@ -54,7 +47,7 @@ fn start(
                         .get_or_insert_with(|| {
                             gpu::Decoder::new(
                                 device.clone(),
-                                queue.clone(),
+                                device.wgpu_queue(),
                                 weak.clone(),
                                 width,
                                 height,
@@ -92,58 +85,39 @@ fn start(
             }
         }
     });
-    Ok(net_sender)
+    Ok(())
 }
 
-pub fn setup(app: &App, device: Arc<VulkanDevice>, queue: wgpu::Queue) {
-    let weak = app.as_weak();
-
-    app.on_start_client(move |server_address| {
-        nettime::sync_time().unwrap();
-        let stop_signal = Signal::new();
-        match start(
-            weak.clone(),
-            device.clone(),
-            queue.clone(),
-            &server_address,
-            stop_signal.clone(),
-        ) {
-            Ok(net_sender) => {
-                let app = weak.upgrade().unwrap();
-                let weak = app.as_weak();
-                let stop_signal2 = stop_signal.clone();
-
-                app.on_escape(move || {
-                    info!("Stopping client");
-                    stop_signal2.set();
-                    setup_menu(&weak);
-                });
-                app.on_keyboard_input(move |text, action| {
-                    // text is only a string because slint does not work with characters
-                    let Some(char) = text.chars().next() else {
-                        return;
-                    };
-                    info!("Key {}: '{}'", action, char);
-                    let packet = Packet::Input(Key {
-                        char,
-                        action: if action == "pressed" {
-                            Action::Press
-                        } else {
-                            Action::Release
-                        },
-                    });
-                    let raw_packet = wincode::serialize(&packet).unwrap();
-                    net_sender.send(raw_packet).unwrap();
-                });
-                "".into()
-            }
-            Err(err) => {
-                if err.io_kind() == Some(io::ErrorKind::InvalidInput) {
-                    return "Invalid address".into();
-                }
-                warn!("Failed to start client: {:?}", err);
-                format!("{:?}", err).into()
-            }
-        }
+pub fn start_input_handler(app: &App, net_sender: netnet::Sender) {
+    app.on_keyboard_input(move |text, action| {
+        // text is only a string because slint does not work with characters
+        let Some(char) = text.chars().next() else {
+            return;
+        };
+        info!("Key {}: '{}'", action, char);
+        let packet = Packet::Input(Key {
+            char,
+            action: if action == "pressed" {
+                Action::Press
+            } else {
+                Action::Release
+            },
+        });
+        let raw_packet = wincode::serialize(&packet).unwrap();
+        net_sender.send(raw_packet).unwrap();
     });
+    info!("Registered input handler");
+}
+
+pub fn start(
+    weak: Weak<App>,
+    device: Arc<VulkanDevice>,
+    net_sender: netnet::Sender,
+    net_receiver: netnet::Receiver,
+) -> anyhow::Result<()> {
+    start_renderer(weak.clone(), device, net_receiver)?;
+    weak.upgrade_in_event_loop(move |app| {
+        start_input_handler(&app, net_sender);
+    })?;
+    Ok(())
 }
