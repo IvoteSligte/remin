@@ -26,7 +26,7 @@ fn start_connected_update_loop(weak: Weak<App>, stop_signal: Signal, connected_s
                 })
                 .unwrap();
             }
-            std::thread::sleep(Duration::from_millis(10));
+            std::thread::sleep(Duration::from_millis(1));
         }
     });
 }
