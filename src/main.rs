@@ -78,6 +78,7 @@ fn on_connect(
         })));
         let vars2 = vars.clone();
         weak.upgrade_in_event_loop(move |app| {
+            let mut error = String::new();
             app.on_share_screen(move || {
                 info!("Starting caster");
                 let Some(Vars {
@@ -86,13 +87,19 @@ fn on_connect(
                     net_receiver,
                 }) = vars.lock().unwrap().take()
                 else {
-                    // FIXME: on double click this is triggered, which means the error is also cleared...
-                    return "".into();
+                    // Very rarely, this on_share_screen callback is triggered twice by a button press.
+                    // This is a hacky workaround for a NOOP when the problem occurs.
+                    warn!("'Share Screen' triggered twice");
+                    // Just return the same error as before (if any)
+                    return error.as_str().into();
                 };
                 info!("Acquired variables");
                 match caster::start(device, net_sender, net_receiver) {
                     Ok(()) => "".into(),
-                    Err(err) => err.to_string().into(),
+                    Err(err) => {
+                        error = err.to_string();
+                        error.as_str().into()
+                    }
                 }
             });
             info!("Set on-share-screen callback");
@@ -100,9 +107,8 @@ fn on_connect(
         .unwrap();
         // Checks if the user should become a viewer depending on received packets
         loop {
-            // Deliberately not doing `while let Some(..) = vars2.lock().unwrap.as_ref()`
-            // because that keeps the lock for too long, causing a significant delay
-            // when the user presses "Share Screen".
+            // Wait before acquiring lock to give the "Share Screen" thread a chance to do so
+            std::thread::sleep(Duration::from_millis(1));
             let mut mutex_guard = vars2.lock().unwrap();
             let Some(Vars { net_receiver, .. }) = mutex_guard.as_ref() else {
                 break;
