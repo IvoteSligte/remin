@@ -4,10 +4,7 @@ use log::info;
 use netnet::Signal;
 use slint::Weak;
 
-use crate::{
-    App,
-    common::{MAX_LATENCY, SERVER_PORT},
-};
+use crate::{App, common::SERVER_PORT};
 
 // TODO: stop client/server video streams when Escape is pressed
 // TODO: stop server input TCP stream when Escape is pressed
@@ -37,7 +34,7 @@ pub fn connect_server(
     on_connect: impl FnOnce(netnet::Sender, netnet::Receiver) -> anyhow::Result<()> + Send + 'static,
 ) -> anyhow::Result<()> {
     info!("Creating server");
-    let net_receiver = netnet::create_server(SERVER_PORT, MAX_LATENCY, stop_signal.clone(), None)?;
+    let net_receiver = netnet::create_server(SERVER_PORT, stop_signal.clone(), None)?;
     start_connected_update_loop(weak, stop_signal, net_receiver.connected_signal());
 
     std::thread::spawn(move || {
@@ -63,8 +60,7 @@ pub fn connect_client(
     on_connect: impl FnOnce(netnet::Sender, netnet::Receiver) -> anyhow::Result<()> + Send + 'static,
 ) -> netnet::Result<()> {
     info!("Creating connection with server");
-    let (net_sender, net_receiver) =
-        netnet::create_client(server_addr, MAX_LATENCY, stop_signal.clone(), None)?;
+    let (net_sender, net_receiver) = netnet::create_client(server_addr, stop_signal.clone(), None)?;
     info!("Connected to server");
     start_connected_update_loop(weak, stop_signal, net_receiver.connected_signal());
     std::thread::spawn(move || {

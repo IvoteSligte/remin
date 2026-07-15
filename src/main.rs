@@ -10,7 +10,7 @@ use gpu_video::{
     VulkanDevice, VulkanInstance,
     parameters::{VulkanAdapterDescriptor, VulkanDeviceDescriptor},
 };
-use log::{info, warn};
+use log::{error, info, warn};
 use netnet::Signal;
 use slint::{ComponentHandle, Weak};
 
@@ -118,12 +118,13 @@ fn on_connect(
                 Err(netnet::Error::Timeout) => continue,
                 Err(err) => return Err(err.into()),
             };
-            let packet: Packet = wincode::deserialize(&raw_packet.body)?;
+            let packet: Packet = wincode::deserialize(&raw_packet)?;
             match packet {
                 Packet::Input(_) => {
-                    warn!("Received input from peer without sharing screen");
+                    error!("Received input from peer without sharing screen");
                 }
-                // drops a single packet, but the stream is known to be lossy anyways
+                // Drops a single packet, but the stream is known to be lossy anyways so will recover.
+                // TODO: no longer drop this packet
                 Packet::H264 { .. } => {
                     info!("Received video packet from peer; starting viewer");
                     let Vars {
@@ -152,9 +153,6 @@ fn main() -> anyhow::Result<()> {
 
     let weak = app.as_weak();
     let weak2 = app.as_weak();
-
-    // TODO: show failure in GUI?
-    nettime::sync_time()?;
 
     app.on_start_server(move || {
         let stop_signal = Signal::new();

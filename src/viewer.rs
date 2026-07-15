@@ -1,6 +1,5 @@
 use gpu_video::VulkanDevice;
 use log::{debug, info, warn};
-use netnet::since_micros;
 use slint::Weak;
 use std::{sync::Arc, time::Instant};
 
@@ -27,21 +26,16 @@ pub fn start_renderer(
         let mut last_frame_instant = Instant::now();
         loop {
             let raw_packet = net_receiver.recv().unwrap();
-            let packet: Packet = wincode::deserialize(&raw_packet.body).unwrap();
+            let packet: Packet = wincode::deserialize(&raw_packet).unwrap();
             match packet {
                 Packet::Input(_) => unreachable!("Client should not receive input packets"),
                 Packet::H264 {
-                    frame_timestamp,
                     bytes,
                     width,
                     height,
                 } => {
                     fps.tick();
-                    debug!(
-                        "Received frame from server (latency: {:.2}ms total; {:.2} fps)",
-                        since_micros(frame_timestamp).num_microseconds().unwrap() as f32 / 1000.0,
-                        fps.avg(),
-                    );
+                    debug!("Received frame from server ({:.2} fps)", fps.avg());
                     let pre_decode = Instant::now();
                     match decoder
                         .get_or_insert_with(|| {
@@ -77,10 +71,6 @@ pub fn start_renderer(
                         (now - last_frame_instant).as_micros() as f32 / 1000.0
                     );
                     last_frame_instant = now;
-                    debug!(
-                        "Total frame latency: {:.2}ms",
-                        since_micros(frame_timestamp).num_microseconds().unwrap() as f32 / 1000.0
-                    );
                 }
             }
         }

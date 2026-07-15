@@ -1094,6 +1094,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-queue"
+version = "0.3.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "803d13fb3b09d88be9f4dbc29062c66b19bf7170867ceb746d2a8689bf6c7a26"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "crossbeam-utils"
 version = "0.8.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2818,7 +2827,6 @@ dependencies = [
  "libc",
  "log",
  "memmap2",
- "nettime",
  "thiserror 2.0.18",
  "wayland-client",
  "wayland-protocols-wlr",
@@ -3352,17 +3360,9 @@ dependencies = [
 name = "netnet"
 version = "0.1.0"
 dependencies = [
+ "crossbeam-queue",
  "log",
- "nettime",
-]
-
-[[package]]
-name = "nettime"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "log",
- "rsntp",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -4715,7 +4715,6 @@ dependencies = [
  "janck",
  "log",
  "netnet",
- "nettime",
  "pretty_env_logger",
  "slint",
  "slint-build",
@@ -4785,15 +4784,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1964b10c76125c36f8afe190065a4bf9a87bf324842c05701330bba9f1cacbb"
 dependencies = [
  "memchr",
-]
-
-[[package]]
-name = "rsntp"
-version = "4.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc507d0efdc8ce91a17455b1efe9ada6a21e2414470b3f1d84aefc7ebcf247bd"
-dependencies = [
- "chrono",
 ]
 
 [[package]]

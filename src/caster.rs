@@ -15,7 +15,6 @@ pub(crate) const FRAME_RATE: u32 = 60;
 fn send_chunks(
     net_sender: &netnet::Sender,
     mut data: &[u8],
-    frame_timestamp: i64,
     width: u32,
     height: u32,
 ) {
@@ -24,7 +23,6 @@ fn send_chunks(
 
     let send_packet = |bytes: &[u8]| {
         let raw_packet = wincode::serialize(&Packet::H264 {
-            frame_timestamp,
             bytes,
             width,
             height,
@@ -67,7 +65,6 @@ pub fn start_screencast(
 
         // TODO: if janck can capture directly into [wgpu::Texture]s then the entire GPU upload step of encoding can be skipped
         for janck::Frame {
-            timestamp: frame_timestamp,
             bytes,
             width,
             height,
@@ -93,7 +90,7 @@ pub fn start_screencast(
                 encoded.len(),
                 fps.avg()
             );
-            send_chunks(&net_sender, &encoded, frame_timestamp, width, height);
+            send_chunks(&net_sender, &encoded, width, height);
         }
     });
     info!("Started screen cast");
@@ -108,7 +105,7 @@ pub fn start_input_handler(net_receiver: netnet::Receiver) -> anyhow::Result<()>
     std::thread::spawn(move || {
         loop {
             let raw_packet = net_receiver.recv().unwrap();
-            let Packet::Input(key) = wincode::deserialize(&raw_packet.body).unwrap() else {
+            let Packet::Input(key) = wincode::deserialize(&raw_packet).unwrap() else {
                 unreachable!();
             };
             info!("Read {:?}", key);

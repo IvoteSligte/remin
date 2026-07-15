@@ -22,7 +22,6 @@ thiserror = "2.0.18"
 
 janck = { path = "./janck" }
 netnet = { path = "./netnet" }
-nettime = { version = "0.1.0", path = "nettime" }
 
 # always use release profile for janck
 # settings from https://doc.rust-lang.org/cargo/reference/profiles.html#release
