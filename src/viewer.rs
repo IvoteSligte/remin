@@ -12,7 +12,7 @@ use crate::{
 pub fn start_renderer(
     weak: Weak<App>,
     device: Arc<VulkanDevice>,
-    net_receiver: netnet::Receiver,
+    mut net_receiver: netnet::Receiver,
 ) -> anyhow::Result<()> {
     info!("Started packet processing loop");
     let mut decoder = None;
@@ -78,7 +78,7 @@ pub fn start_renderer(
     Ok(())
 }
 
-pub fn start_input_handler(app: &App, net_sender: netnet::Sender) {
+pub fn start_input_handler(app: &App, mut net_sender: netnet::Sender) {
     app.on_keyboard_input(move |text, action| {
         // text is only a string because slint does not work with characters
         let Some(char) = text.chars().next() else {

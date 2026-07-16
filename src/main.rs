@@ -110,7 +110,7 @@ fn on_connect(
             // Wait before acquiring lock to give the "Share Screen" thread a chance to do so
             std::thread::sleep(Duration::from_millis(1));
             let mut mutex_guard = vars2.lock().unwrap();
-            let Some(Vars { net_receiver, .. }) = mutex_guard.as_ref() else {
+            let Some(Vars { net_receiver, .. }) = mutex_guard.as_mut() else {
                 break;
             };
             let raw_packet = match net_receiver.recv_timeout(Duration::from_millis(1)) {

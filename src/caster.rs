@@ -12,16 +12,11 @@ use crate::gpu;
 // TODO: resolution downscaling and frame rate reduction according to the client's monitor
 pub(crate) const FRAME_RATE: u32 = 60;
 
-fn send_chunks(
-    net_sender: &netnet::Sender,
-    mut data: &[u8],
-    width: u32,
-    height: u32,
-) {
+fn send_chunks(net_sender: &mut netnet::Sender, mut data: &[u8], width: u32, height: u32) {
     // max packet size - (sizeof(frame_timestamp) + sizeof(width) + sizeof(height) + sizeof(&[u8]))
     const MAX_CHUNK_SIZE: usize = netnet::MAX_PACKET_SIZE - 28;
 
-    let send_packet = |bytes: &[u8]| {
+    let mut send_packet = |bytes: &[u8]| {
         let raw_packet = wincode::serialize(&Packet::H264 {
             bytes,
             width,
@@ -48,7 +43,7 @@ fn send_chunks(
 
 pub fn start_screencast(
     device: Arc<VulkanDevice>,
-    net_sender: netnet::Sender,
+    mut net_sender: netnet::Sender,
 ) -> Result<(), janck::Error> {
     let (frame_sender, frame_receiver) = mpsc::sync_channel::<janck::Frame>(0);
     let video = janck::capture_video(FRAME_RATE as _)?;
@@ -90,14 +85,14 @@ pub fn start_screencast(
                 encoded.len(),
                 fps.avg()
             );
-            send_chunks(&net_sender, &encoded, width, height);
+            send_chunks(&mut net_sender, &encoded, width, height);
         }
     });
     info!("Started screen cast");
     Ok(())
 }
 
-pub fn start_input_handler(net_receiver: netnet::Receiver) -> anyhow::Result<()> {
+pub fn start_input_handler(mut net_receiver: netnet::Receiver) -> anyhow::Result<()> {
     info!("Starting input handler");
     let mut enigo = Enigo::new(&enigo::Settings::default())?;
     info!("Created virtual keyboard");
@@ -109,6 +104,7 @@ pub fn start_input_handler(net_receiver: netnet::Receiver) -> anyhow::Result<()>
                 unreachable!();
             };
             info!("Read {:?}", key);
+            // TODO: add modifier key support (simple key press/release)
             enigo
                 .key(enigo::Key::Unicode(key.char), key.action.into())
                 .unwrap();
