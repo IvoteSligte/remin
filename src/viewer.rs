@@ -2,7 +2,7 @@ use gpu_video::VulkanDevice;
 use log::{debug, info, trace, warn};
 use netnet::Connection;
 use slint::Weak;
-use std::{sync::Arc, time::Instant};
+use std::{iter, sync::Arc, time::Instant};
 
 use crate::{
     App,
@@ -33,25 +33,63 @@ pub fn start_renderer(
 
     tokio::task::spawn(async move {
         let fragments_per_second = fps_ticker::Fps::default();
+        let frames_per_second = fps_ticker::Fps::default();
         let mut last_frame_instant = Instant::now();
+        let mut current_frame_index = 0;
+        let mut fragment_map = Vec::with_capacity(100);
+        let mut num_fragments_found = 0;
+
         while let Some(bytes) = packet_receiver.recv().await {
             let packet: Packet = wincode::deserialize(&bytes).unwrap();
             match packet {
                 Packet::Input(_) => unreachable!("Client should not receive input packets"),
+                Packet::IAmCaster => (),
                 Packet::H264 {
                     frame_index,
                     fragment_index,
+                    total_fragments,
                     width,
                     height,
                     bytes,
                 } => {
                     fragments_per_second.tick();
                     trace!(
-                        "Received frame fragment {}:{} from server ({:.0}/s)",
+                        "Received frame {} fragment {}/{} from server ({:.0}/s)",
                         frame_index,
                         fragment_index,
+                        total_fragments,
                         fragments_per_second.avg()
                     );
+                    if frame_index > current_frame_index {
+                        debug!(
+                            "Skipping incomplete frame {} with {}/{} fragments",
+                            current_frame_index, num_fragments_found, total_fragments
+                        );
+                    }
+                    if frame_index > current_frame_index || num_fragments_found == 0 {
+                        fragment_map.clear();
+                        fragment_map.extend(iter::repeat(Vec::new()).take(total_fragments as _));
+                        current_frame_index = frame_index;
+                    }
+                    debug_assert!(fragment_index < total_fragments);
+                    debug_assert!(total_fragments as usize == fragment_map.len());
+
+                    if !fragment_map[fragment_index as usize].is_empty() {
+                        trace!("Duplicate fragment {}", fragment_index);
+                        continue;
+                    }
+                    fragment_map[fragment_index as usize] = bytes.to_vec();
+                    num_fragments_found += 1;
+                    if num_fragments_found < total_fragments {
+                        continue;
+                    }
+                    current_frame_index += 1;
+                    num_fragments_found = 0;
+                    trace!(
+                        "Gathered all {} fragments for frame {}",
+                        total_fragments, frame_index,
+                    );
+                    let frame_bytes = fragment_map.iter().flatten().copied().collect::<Vec<u8>>();
                     let pre_decode = Instant::now();
                     match decoder
                         .get_or_insert_with(|| {
@@ -64,13 +102,17 @@ pub fn start_renderer(
                             )
                             .unwrap()
                         })
-                        .decode(&bytes)
+                        .decode(&frame_bytes)
                     {
-                        Ok(()) => (),
+                        Ok(()) => {
+                            frames_per_second.tick();
+                            debug!("Rendering new frame ({:.2}/s)", frames_per_second.avg());
+                        }
                         Err(gpu::DecoderError::NoNewFrame) => {
-                            trace!("Not enough frame data to construct a new frame");
+                            debug!("Not enough frame data to construct a new frame");
                             continue;
                         }
+                        // TODO: restart video stream if many sequential errors have been encountered
                         Err(err) => {
                             warn!("Failed to decode frame: {err}");
                             continue;

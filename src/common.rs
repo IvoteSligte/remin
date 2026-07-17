@@ -39,10 +39,13 @@ pub struct Key {
 pub enum Packet<'a> {
     /// Keyboard input
     Input(Key),
+    /// Indicates that the sender has chosen the `caster` role
+    IAmCaster,
     /// H.264 video fragment
     H264 {
         frame_index: u64,
         fragment_index: u32,
+        total_fragments: u32,
         width: u32,
         height: u32,
         bytes: &'a [u8],

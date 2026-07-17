@@ -13,37 +13,43 @@ use crate::gpu;
 // TODO: resolution downscaling and frame rate reduction according to the client's monitor
 pub(crate) const FRAME_RATE: u32 = 60;
 
-fn send_chunks(connection: &Connection, mut data: &[u8], frame_index: u64, width: u32, height: u32) {
-    // max datagram size - (sizeof(width) + sizeof(height) + sizeof(&[u8]) + sizeof(frame_index) + sizeof(fragment_index))
-    let max_chunk_size = connection.max_datagram_size().unwrap() - 32;
-    let mut fragment_index = 0;
-    
-    let mut send_packet = |bytes: &[u8]| {
-        let bytes = wincode::serialize(&Packet::H264 {
-            frame_index,
-            fragment_index,
-            width,
-            height,
-            bytes,
-        })
-            .unwrap();
-        fragment_index += 1;
-        connection.send_datagram(bytes.into()).unwrap();
-    };
+fn send_chunks(
+    connection: &Connection,
+    mut data: &[u8],
+    frame_index: u64,
+    width: u32,
+    height: u32,
+) {
+    // max datagram size - (sizeof(width) + sizeof(height) + sizeof(&[u8]) + sizeof(frame_index) + sizeof(fragment_index) + sizeof(total_fragments))
+    let max_chunk_size = connection.max_datagram_size().unwrap() - 36;
+    let mut packet_queue = Vec::with_capacity(data.len().div_ceil(max_chunk_size));
 
     // TODO: send small NAL units together
     let mut i = 4;
     while data.len() > max_chunk_size {
         if i >= max_chunk_size || &data[i..usize::min(i + 4, data.len())] == &[0, 0, 0, 1] {
             // NAL unit start found
-            send_packet(&data[..i]);
+            packet_queue.push(&data[..i]);
             data = &data[i..];
             i = 4;
             continue;
         }
         i += 1;
     }
-    send_packet(data);
+    packet_queue.push(data);
+
+    for (i, slice) in packet_queue.iter().enumerate() {
+        let bytes = wincode::serialize(&Packet::H264 {
+            frame_index,
+            fragment_index: i as u32,
+            total_fragments: packet_queue.len() as u32,
+            width,
+            height,
+            bytes: slice,
+        })
+        .unwrap();
+        connection.send_datagram(bytes.into()).unwrap();
+    }
 }
 
 pub fn start_screencast(
@@ -53,6 +59,11 @@ pub fn start_screencast(
     let (frame_sender, frame_receiver) = mpsc::sync_channel::<janck::Frame>(0);
     let video = janck::capture_video(FRAME_RATE as _)?;
 
+    for _ in 0..100 {
+        let packet = Packet::IAmCaster;
+        let bytes = wincode::serialize(&packet).unwrap();
+        connection.send_datagram(bytes.into()).unwrap();
+    }
     std::thread::spawn(move || {
         // Using a separate thread allows a frame to be captured while another one is being processed
         for frame in video {

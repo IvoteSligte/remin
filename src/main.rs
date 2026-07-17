@@ -104,10 +104,9 @@ fn on_connect(
                     Packet::Input(_) => {
                         error!("Received input from peer without sharing screen");
                     }
-                    // Drops a single packet, but the stream is known to be lossy anyways so will recover.
-                    // TODO: no longer drop this packet: either send a bunch of Packet::H264Marker before
-                    // starting the screencasting or use a reliable QUIC stream to send a control signal
-                    Packet::H264 { .. } => {
+                    // Drops a single packet if Packet::H264 is found, which is likely to be the PicParamSet packet.
+                    // TODO: Send PicParamSet and "IAmCaster" signal over reliable QUIC stream
+                    Packet::IAmCaster | Packet::H264 { .. } => {
                         info!("Received video packet from peer; starting viewer");
                         on_share_screen2.lock().unwrap().take();
                         // screen was shared by peer, which implies that this user should be the viewer
