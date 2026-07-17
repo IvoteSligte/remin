@@ -41,6 +41,8 @@ pub enum Packet<'a> {
     Input(Key),
     /// H.264 video fragment
     H264 {
+        frame_index: u64,
+        fragment_index: u32,
         width: u32,
         height: u32,
         bytes: &'a [u8],

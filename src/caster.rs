@@ -13,17 +13,21 @@ use crate::gpu;
 // TODO: resolution downscaling and frame rate reduction according to the client's monitor
 pub(crate) const FRAME_RATE: u32 = 60;
 
-fn send_chunks(connection: &Connection, mut data: &[u8], width: u32, height: u32) {
-    // max datagram size - (sizeof(width) + sizeof(height) + sizeof(&[u8]))
-    let max_chunk_size = connection.max_datagram_size().unwrap() - 20;
-
-    let send_packet = |bytes: &[u8]| {
+fn send_chunks(connection: &Connection, mut data: &[u8], frame_index: u64, width: u32, height: u32) {
+    // max datagram size - (sizeof(width) + sizeof(height) + sizeof(&[u8]) + sizeof(frame_index) + sizeof(fragment_index))
+    let max_chunk_size = connection.max_datagram_size().unwrap() - 32;
+    let mut fragment_index = 0;
+    
+    let mut send_packet = |bytes: &[u8]| {
         let bytes = wincode::serialize(&Packet::H264 {
-            bytes,
+            frame_index,
+            fragment_index,
             width,
             height,
+            bytes,
         })
-        .unwrap();
+            .unwrap();
+        fragment_index += 1;
         connection.send_datagram(bytes.into()).unwrap();
     };
 
@@ -58,6 +62,7 @@ pub fn start_screencast(
     std::thread::spawn(move || {
         let mut encoder = None;
         let fps = Fps::default();
+        let mut frame_index = 0;
 
         // TODO: if janck can capture directly into [wgpu::Texture]s then the entire GPU upload step of encoding can be skipped
         for janck::Frame {
@@ -86,7 +91,8 @@ pub fn start_screencast(
                 encoded.len(),
                 fps.avg()
             );
-            send_chunks(&connection, &encoded, width, height);
+            send_chunks(&connection, &encoded, frame_index, width, height);
+            frame_index += 1;
         }
     });
     info!("Started screen cast");

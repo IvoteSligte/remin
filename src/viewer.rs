@@ -1,5 +1,5 @@
 use gpu_video::VulkanDevice;
-use log::{debug, info, warn};
+use log::{debug, info, trace, warn};
 use netnet::Connection;
 use slint::Weak;
 use std::{sync::Arc, time::Instant};
@@ -13,7 +13,7 @@ use crate::{
 pub fn start_renderer(
     weak: Weak<App>,
     device: Arc<VulkanDevice>,
-    connection: Arc<Connection>
+    connection: Arc<Connection>,
 ) -> anyhow::Result<()> {
     info!("Started packet processing loop");
     let mut decoder = None;
@@ -22,21 +22,36 @@ pub fn start_renderer(
         app.set_view("viewer".into());
     })?;
 
+    let (packet_sender, mut packet_receiver) = tokio::sync::mpsc::channel(100);
+
     tokio::task::spawn(async move {
-        let fps = fps_ticker::Fps::default();
-        let mut last_frame_instant = Instant::now();
         loop {
-            let bytes = connection.read_datagram().await.unwrap();
+            let packet = connection.read_datagram().await.unwrap();
+            packet_sender.send(packet).await.unwrap();
+        }
+    });
+
+    tokio::task::spawn(async move {
+        let fragments_per_second = fps_ticker::Fps::default();
+        let mut last_frame_instant = Instant::now();
+        while let Some(bytes) = packet_receiver.recv().await {
             let packet: Packet = wincode::deserialize(&bytes).unwrap();
             match packet {
                 Packet::Input(_) => unreachable!("Client should not receive input packets"),
                 Packet::H264 {
-                    bytes,
+                    frame_index,
+                    fragment_index,
                     width,
                     height,
+                    bytes,
                 } => {
-                    fps.tick();
-                    debug!("Received frame from server ({:.2} fps)", fps.avg());
+                    fragments_per_second.tick();
+                    trace!(
+                        "Received frame fragment {}:{} from server ({:.0}/s)",
+                        frame_index,
+                        fragment_index,
+                        fragments_per_second.avg()
+                    );
                     let pre_decode = Instant::now();
                     match decoder
                         .get_or_insert_with(|| {
@@ -53,7 +68,7 @@ pub fn start_renderer(
                     {
                         Ok(()) => (),
                         Err(gpu::DecoderError::NoNewFrame) => {
-                            debug!("Not enough frame data to construct a new frame");
+                            trace!("Not enough frame data to construct a new frame");
                             continue;
                         }
                         Err(err) => {
@@ -103,7 +118,7 @@ pub fn start_input_handler(app: &App, connection: Arc<Connection>) {
 pub fn start(
     weak: Weak<App>,
     device: Arc<VulkanDevice>,
-    connection: Arc<Connection>
+    connection: Arc<Connection>,
 ) -> anyhow::Result<()> {
     start_renderer(weak.clone(), device, connection.clone())?;
     weak.upgrade_in_event_loop(move |app| {
