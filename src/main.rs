@@ -2,7 +2,6 @@ use std::{
     io,
     net::{IpAddr, SocketAddr},
     sync::{Arc, Mutex},
-    time::Duration,
 };
 
 use common::{Packet, SERVER_PORT};
@@ -10,9 +9,10 @@ use gpu_video::{
     VulkanDevice, VulkanInstance,
     parameters::{VulkanAdapterDescriptor, VulkanDeviceDescriptor},
 };
-use log::{error, info, warn};
-use netnet::Signal;
+use log::{error, info};
+use netnet::Connection;
 use slint::{ComponentHandle, Weak};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod caster;
 mod common;
@@ -64,85 +64,67 @@ fn init_backend() -> anyhow::Result<Arc<VulkanDevice>> {
 fn on_connect(
     weak: Weak<App>,
     device: Arc<VulkanDevice>,
-) -> impl FnOnce(netnet::Sender, netnet::Receiver) -> anyhow::Result<()> {
-    |net_sender, net_receiver| {
-        struct Vars {
-            device: Arc<VulkanDevice>,
-            net_sender: netnet::Sender,
-            net_receiver: netnet::Receiver,
-        }
-        let vars = Arc::new(Mutex::new(Some(Vars {
-            device,
-            net_sender,
-            net_receiver,
-        })));
-        let vars2 = vars.clone();
-        weak.upgrade_in_event_loop(move |app| {
-            let mut error = String::new();
-            app.on_share_screen(move || {
-                info!("Starting caster");
-                let Some(Vars {
-                    device,
-                    net_sender,
-                    net_receiver,
-                }) = vars.lock().unwrap().take()
-                else {
-                    // Very rarely, this on_share_screen callback is triggered twice by a button press.
-                    // This is a hacky workaround for a NOOP when the problem occurs.
-                    warn!("'Share Screen' triggered twice");
-                    // Just return the same error as before (if any)
-                    return error.as_str().into();
-                };
-                info!("Acquired variables");
-                match caster::start(device, net_sender, net_receiver) {
-                    Ok(()) => "".into(),
-                    Err(err) => {
-                        error = err.to_string();
-                        error.as_str().into()
+    connection: Arc<Connection>,
+) -> impl Future<Output = anyhow::Result<()>> {
+    info!("Connected; running caster/viewer selection checks");
+
+    let (claim_sender, claim_receiver) = tokio::sync::oneshot::channel::<()>();
+    let device2 = device.clone();
+    let connection2 = connection.clone();
+    let on_share_screen = Arc::new(Mutex::new(Some(move || {
+        info!("Starting caster");
+        claim_sender.send(()).unwrap();
+        info!("Acquired variables");
+        let error = match caster::start(device2, connection2) {
+            Ok(()) => "".into(),
+            Err(err) => err.to_string().into(),
+        };
+        error
+    })));
+    let on_share_screen2 = on_share_screen.clone();
+    weak.upgrade_in_event_loop(move |app| {
+        app.on_share_screen(move || {
+            if let Some(callback) = on_share_screen.lock().unwrap().take() {
+                callback()
+            } else {
+                "'Share Screen' pressed twice".into()
+            }
+        });
+        info!("Set on-share-screen callback");
+    })
+    .unwrap();
+    // Checks if the user should become a viewer depending on received packets
+    async move {
+        tokio::select! {
+            _ = claim_receiver => { Ok(()) }
+            result = async {loop {
+                let bytes = connection.read_datagram().await?;
+                let packet: Packet = wincode::deserialize(&bytes)?;
+                match packet {
+                    Packet::Input(_) => {
+                        error!("Received input from peer without sharing screen");
+                    }
+                    // Drops a single packet, but the stream is known to be lossy anyways so will recover.
+                    // TODO: no longer drop this packet: either send a bunch of Packet::H264Marker before
+                    // starting the screencasting or use a reliable QUIC stream to send a control signal
+                    Packet::H264 { .. } => {
+                        info!("Received video packet from peer; starting viewer");
+                        on_share_screen2.lock().unwrap().take();
+                        // screen was shared by peer, which implies that this user should be the viewer
+                        break viewer::start(weak, device, connection);
                     }
                 }
-            });
-            info!("Set on-share-screen callback");
-        })
-        .unwrap();
-        // Checks if the user should become a viewer depending on received packets
-        loop {
-            // Wait before acquiring lock to give the "Share Screen" thread a chance to do so
-            std::thread::sleep(Duration::from_millis(1));
-            let mut mutex_guard = vars2.lock().unwrap();
-            let Some(Vars { net_receiver, .. }) = mutex_guard.as_mut() else {
-                break;
-            };
-            let raw_packet = match net_receiver.recv_timeout(Duration::from_millis(1)) {
-                Ok(rp) => rp,
-                Err(netnet::Error::Timeout) => continue,
-                Err(err) => return Err(err.into()),
-            };
-            let packet: Packet = wincode::deserialize(&raw_packet)?;
-            match packet {
-                Packet::Input(_) => {
-                    error!("Received input from peer without sharing screen");
-                }
-                // Drops a single packet, but the stream is known to be lossy anyways so will recover.
-                // TODO: no longer drop this packet
-                Packet::H264 { .. } => {
-                    info!("Received video packet from peer; starting viewer");
-                    let Vars {
-                        device,
-                        net_sender,
-                        net_receiver,
-                    } = mutex_guard.take().unwrap();
-                    // screen was shared by peer, which implies that this user should be the viewer
-                    return viewer::start(weak, device, net_sender, net_receiver);
-                }
-            }
+            }} => {result}
         }
-        Ok(())
     }
 }
 
-fn main() -> anyhow::Result<()> {
-    pretty_env_logger::init();
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::filter::EnvFilter::from_default_env())
+        .with(tracing_subscriber::fmt::layer())
+        .init();
 
     let device = init_backend()?;
     let device2 = device.clone();
@@ -154,35 +136,47 @@ fn main() -> anyhow::Result<()> {
     let weak = app.as_weak();
     let weak2 = app.as_weak();
 
+    // TODO: stop signals
     app.on_start_server(move || {
-        let stop_signal = Signal::new();
         let device = device.clone();
-        match net::connect_server(weak.clone(), stop_signal, on_connect(weak.clone(), device)) {
-            Ok(()) => "".into(),
-            Err(err) => err.to_string().into(),
-        }
+        let future = match net::connect_server(weak.clone()) {
+            Ok(f) => f,
+            Err(err) => return err.to_string().into(),
+        };
+        let weak = weak.clone();
+        let _: slint::JoinHandle<anyhow::Result<()>> =
+            slint::spawn_local(async_compat::Compat::new(async move {
+                let connection = future.await?;
+                on_connect(weak, device, connection).await
+            }))
+            .unwrap();
+        "".into()
     });
     app.on_start_client(move |server_addr_str| {
         match parse_socket_address(&server_addr_str, SERVER_PORT) {
             Ok(server_addr) => {
                 // TODO: handle errors instead of unwrapping
-                let stop_signal = Signal::new();
                 let device = device2.clone();
-                match net::connect_client(
-                    weak2.clone(),
-                    server_addr,
-                    stop_signal,
-                    on_connect(weak2.clone(), device),
-                ) {
-                    Ok(()) => "".into(),
-                    Err(err) => err.to_string().into(),
-                }
+                let future = match net::connect_client(weak2.clone(), server_addr) {
+                    Ok(f) => f,
+                    Err(err) => return err.to_string().into(),
+                };
+                let weak = weak2.clone();
+                let _: slint::JoinHandle<anyhow::Result<()>> =
+                    slint::spawn_local(async_compat::Compat::new(async move {
+                        let connection = future.await?;
+                        on_connect(weak, device, connection).await
+                    }))
+                    .unwrap();
+                "".into()
             }
             Err(err) => err.to_string().into(),
         }
     });
 
     info!("Running app");
-    app.run()?;
-    Ok(())
+    tokio::task::block_in_place(|| {
+        app.run()?;
+        Ok(())
+    })
 }

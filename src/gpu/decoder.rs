@@ -1,11 +1,10 @@
-use std::{sync::Arc, time::Instant};
+use std::{sync::{Arc, atomic::{AtomicBool, Ordering}}, time::Instant};
 
 use gpu_video::{
     EncodedInputChunk, VulkanDevice, WgpuTexturesDecoder as WgpuTexturesDecoderH264,
     parameters::{ColorRange, ColorSpace, DecoderParameters},
 };
 use log::{info, trace, warn};
-use netnet::Signal;
 use slint::{ComponentHandle, Weak};
 use thiserror::Error;
 use wgpu::{Device, Queue, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor};
@@ -14,6 +13,29 @@ use super::create_texture;
 use super::wgpu_helpers::{WgpuConverterParameters, WgpuNv12ToRgbaConverter};
 
 use crate::App;
+
+#[derive(Default, Clone)]
+pub struct Signal {
+    value: Arc<AtomicBool>,
+}
+
+impl Signal {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn set(&self) {
+        self.value.store(true, Ordering::Release);
+    }
+
+    pub fn clear(&self) {
+        self.value.store(false, Ordering::Release);
+    }
+
+    pub fn get(&self) -> bool {
+        self.value.load(Ordering::Acquire)
+    }
+}
 
 #[derive(Error, Debug)]
 pub enum DecoderError {

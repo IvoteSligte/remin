@@ -1,5 +1,6 @@
 use gpu_video::VulkanDevice;
 use log::{debug, info, warn};
+use netnet::Connection;
 use slint::Weak;
 use std::{sync::Arc, time::Instant};
 
@@ -12,7 +13,7 @@ use crate::{
 pub fn start_renderer(
     weak: Weak<App>,
     device: Arc<VulkanDevice>,
-    mut net_receiver: netnet::Receiver,
+    connection: Arc<Connection>
 ) -> anyhow::Result<()> {
     info!("Started packet processing loop");
     let mut decoder = None;
@@ -21,12 +22,12 @@ pub fn start_renderer(
         app.set_view("viewer".into());
     })?;
 
-    std::thread::spawn(move || {
+    tokio::task::spawn(async move {
         let fps = fps_ticker::Fps::default();
         let mut last_frame_instant = Instant::now();
         loop {
-            let raw_packet = net_receiver.recv().unwrap();
-            let packet: Packet = wincode::deserialize(&raw_packet).unwrap();
+            let bytes = connection.read_datagram().await.unwrap();
+            let packet: Packet = wincode::deserialize(&bytes).unwrap();
             match packet {
                 Packet::Input(_) => unreachable!("Client should not receive input packets"),
                 Packet::H264 {
@@ -78,7 +79,7 @@ pub fn start_renderer(
     Ok(())
 }
 
-pub fn start_input_handler(app: &App, mut net_sender: netnet::Sender) {
+pub fn start_input_handler(app: &App, connection: Arc<Connection>) {
     app.on_keyboard_input(move |text, action| {
         // text is only a string because slint does not work with characters
         let Some(char) = text.chars().next() else {
@@ -93,8 +94,8 @@ pub fn start_input_handler(app: &App, mut net_sender: netnet::Sender) {
                 Action::Release
             },
         });
-        let raw_packet = wincode::serialize(&packet).unwrap();
-        net_sender.send(raw_packet).unwrap();
+        let bytes = wincode::serialize(&packet).unwrap();
+        connection.send_datagram(bytes.into()).unwrap();
     });
     info!("Registered input handler");
 }
@@ -102,12 +103,11 @@ pub fn start_input_handler(app: &App, mut net_sender: netnet::Sender) {
 pub fn start(
     weak: Weak<App>,
     device: Arc<VulkanDevice>,
-    net_sender: netnet::Sender,
-    net_receiver: netnet::Receiver,
+    connection: Arc<Connection>
 ) -> anyhow::Result<()> {
-    start_renderer(weak.clone(), device, net_receiver)?;
+    start_renderer(weak.clone(), device, connection.clone())?;
     weak.upgrade_in_event_loop(move |app| {
-        start_input_handler(&app, net_sender);
+        start_input_handler(&app, connection);
     })?;
     Ok(())
 }
