@@ -121,6 +121,10 @@ pub fn start_input_handler(mut connection: UnreliableReceiver) -> anyhow::Result
                 c if c == char::from(SlintKey::Return) => enigo::Key::Return,
                 c if c == char::from(SlintKey::Control) => enigo::Key::LControl,
                 c if c == char::from(SlintKey::ControlR) => enigo::Key::RControl,
+                c if c == char::from(SlintKey::UpArrow) => enigo::Key::UpArrow,
+                c if c == char::from(SlintKey::DownArrow) => enigo::Key::DownArrow,
+                c if c == char::from(SlintKey::LeftArrow) => enigo::Key::LeftArrow,
+                c if c == char::from(SlintKey::RightArrow) => enigo::Key::RightArrow,
                 c => enigo::Key::Unicode(c),
             };
             info!("Read {:?}", key);
