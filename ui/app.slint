@@ -67,13 +67,13 @@ export component App inherits Window {
 
         key-pressed(event) => {
             if (view == "viewer" && !event.modifiers.meta && !event.modifiers.alt) {
-                root.keyboard-input(event.text, "pressed");
+                root.keyboard-input(event.text.to-lowercase(), "pressed");
             }
             accept
         }
         key-released(event) => {
             if (view == "viewer" && !event.modifiers.meta && !event.modifiers.alt) {
-                root.keyboard-input(event.text, "released");
+                root.keyboard-input(event.text.to-lowercase(), "released");
             }
             accept
         }
