@@ -1,8 +1,8 @@
 use gpu_video::VulkanDevice;
-use log::{debug, info, trace, warn};
-use netnet::Connection;
+use log::{debug, info, warn};
+use netnet::{Connection, UnreliableReceiver, UnreliableSender};
 use slint::Weak;
-use std::{iter, sync::Arc, time::Instant};
+use std::{sync::Arc, time::Instant};
 
 use crate::{
     App,
@@ -13,7 +13,7 @@ use crate::{
 pub fn start_renderer(
     weak: Weak<App>,
     device: Arc<VulkanDevice>,
-    connection: Arc<Connection>,
+    mut conn: UnreliableReceiver,
 ) -> anyhow::Result<()> {
     info!("Started packet processing loop");
     let mut decoder = None;
@@ -26,18 +26,14 @@ pub fn start_renderer(
 
     tokio::task::spawn(async move {
         loop {
-            let packet = connection.read_datagram().await.unwrap();
+            let packet = conn.recv().unwrap();
             packet_sender.send(packet).await.unwrap();
         }
     });
 
     tokio::task::spawn(async move {
-        let fragments_per_second = fps_ticker::Fps::default();
         let frames_per_second = fps_ticker::Fps::default();
         let mut last_frame_instant = Instant::now();
-        let mut current_frame_index = 0;
-        let mut fragment_map = Vec::with_capacity(100);
-        let mut num_fragments_found = 0;
 
         while let Some(bytes) = packet_receiver.recv().await {
             let packet: Packet = wincode::deserialize(&bytes).unwrap();
@@ -45,51 +41,10 @@ pub fn start_renderer(
                 Packet::Input(_) => unreachable!("Client should not receive input packets"),
                 Packet::IAmCaster => (),
                 Packet::H264 {
-                    frame_index,
-                    fragment_index,
-                    total_fragments,
                     width,
                     height,
                     bytes,
                 } => {
-                    fragments_per_second.tick();
-                    trace!(
-                        "Received frame {} fragment {}/{} from server ({:.0}/s)",
-                        frame_index,
-                        fragment_index,
-                        total_fragments,
-                        fragments_per_second.avg()
-                    );
-                    if frame_index > current_frame_index {
-                        debug!(
-                            "Skipping incomplete frame {} with {}/{} fragments",
-                            current_frame_index, num_fragments_found, total_fragments
-                        );
-                    }
-                    if frame_index > current_frame_index || num_fragments_found == 0 {
-                        fragment_map.clear();
-                        fragment_map.extend(iter::repeat(Vec::new()).take(total_fragments as _));
-                        current_frame_index = frame_index;
-                    }
-                    debug_assert!(fragment_index < total_fragments);
-                    debug_assert!(total_fragments as usize == fragment_map.len());
-
-                    if !fragment_map[fragment_index as usize].is_empty() {
-                        trace!("Duplicate fragment {}", fragment_index);
-                        continue;
-                    }
-                    fragment_map[fragment_index as usize] = bytes.to_vec();
-                    num_fragments_found += 1;
-                    if num_fragments_found < total_fragments {
-                        continue;
-                    }
-                    current_frame_index += 1;
-                    num_fragments_found = 0;
-                    trace!(
-                        "Gathered all {} fragments for frame {}",
-                        total_fragments, frame_index,
-                    );
-                    let frame_bytes = fragment_map.iter().flatten().copied().collect::<Vec<u8>>();
                     let pre_decode = Instant::now();
                     match decoder
                         .get_or_insert_with(|| {
@@ -102,7 +57,7 @@ pub fn start_renderer(
                             )
                             .unwrap()
                         })
-                        .decode(&frame_bytes)
+                        .decode(&bytes)
                     {
                         Ok(()) => {
                             frames_per_second.tick();
@@ -136,7 +91,7 @@ pub fn start_renderer(
     Ok(())
 }
 
-pub fn start_input_handler(app: &App, connection: Arc<Connection>) {
+pub fn start_input_handler(app: &App, mut conn: UnreliableSender) {
     app.on_keyboard_input(move |text, action| {
         // text is only a string because slint does not work with characters
         let Some(char) = text.chars().next() else {
@@ -152,19 +107,15 @@ pub fn start_input_handler(app: &App, connection: Arc<Connection>) {
             },
         });
         let bytes = wincode::serialize(&packet).unwrap();
-        connection.send_datagram(bytes.into()).unwrap();
+        conn.send(&bytes).unwrap();
     });
     info!("Registered input handler");
 }
 
-pub fn start(
-    weak: Weak<App>,
-    device: Arc<VulkanDevice>,
-    connection: Arc<Connection>,
-) -> anyhow::Result<()> {
-    start_renderer(weak.clone(), device, connection.clone())?;
+pub fn start(weak: Weak<App>, device: Arc<VulkanDevice>, conn: Connection) -> anyhow::Result<()> {
+    start_renderer(weak.clone(), device, conn.unreliable_receiver)?;
     weak.upgrade_in_event_loop(move |app| {
-        start_input_handler(&app, connection);
+        start_input_handler(&app, conn.unreliable_sender);
     })?;
     Ok(())
 }

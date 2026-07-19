@@ -3487,12 +3487,15 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-compat",
+ "bytes",
  "crossbeam-queue",
+ "fps_ticker",
  "log",
  "quinn",
  "rcgen",
  "rustls",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

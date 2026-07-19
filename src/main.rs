@@ -2,8 +2,10 @@ use std::{
     io,
     net::{IpAddr, SocketAddr},
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
+use anyhow::bail;
 use common::{Packet, SERVER_PORT};
 use gpu_video::{
     VulkanDevice, VulkanInstance,
@@ -61,61 +63,90 @@ fn init_backend() -> anyhow::Result<Arc<VulkanDevice>> {
     Ok(device)
 }
 
-fn on_connect(
+fn on_share_screen_hook(
     weak: Weak<App>,
     device: Arc<VulkanDevice>,
-    connection: Arc<Connection>,
-) -> impl Future<Output = anyhow::Result<()>> {
-    info!("Connected; running caster/viewer selection checks");
-
-    let (claim_sender, claim_receiver) = tokio::sync::oneshot::channel::<()>();
-    let device2 = device.clone();
-    let connection2 = connection.clone();
-    let on_share_screen = Arc::new(Mutex::new(Some(move || {
-        info!("Starting caster");
-        claim_sender.send(()).unwrap();
-        info!("Acquired variables");
-        let error = match caster::start(device2, connection2) {
-            Ok(()) => "".into(),
-            Err(err) => err.to_string().into(),
-        };
-        error
-    })));
-    let on_share_screen2 = on_share_screen.clone();
+    conn: Arc<Mutex<Option<Connection>>>,
+) {
+    let weak2 = weak.clone();
     weak.upgrade_in_event_loop(move |app| {
         app.on_share_screen(move || {
-            if let Some(callback) = on_share_screen.lock().unwrap().take() {
-                callback()
-            } else {
-                "'Share Screen' pressed twice".into()
-            }
+            weak2
+                .upgrade_in_event_loop(|app| {
+                    app.on_share_screen(|| "'Share Screen' pressed twice".into());
+                })
+                .unwrap();
+
+            info!("Starting caster");
+            let Some(conn) = conn.lock().unwrap().take() else {
+                return "Peer already selected 'Share Screen'".into();
+            };
+            info!("Acquired state");
+            let error = match caster::start(device.clone(), conn) {
+                Ok(()) => "".into(),
+                Err(err) => err.to_string().into(),
+            };
+            error
         });
         info!("Set on-share-screen callback");
     })
     .unwrap();
-    // Checks if the user should become a viewer depending on received packets
-    async move {
-        tokio::select! {
-            _ = claim_receiver => { Ok(()) }
-            result = async {loop {
-                let bytes = connection.read_datagram().await?;
-                let packet: Packet = wincode::deserialize(&bytes)?;
-                match packet {
-                    Packet::Input(_) => {
-                        error!("Received input from peer without sharing screen");
-                    }
-                    // Drops a single packet if Packet::H264 is found, which is likely to be the PicParamSet packet.
-                    // TODO: Send PicParamSet and "IAmCaster" signal over reliable QUIC stream
-                    Packet::IAmCaster | Packet::H264 { .. } => {
-                        info!("Received video packet from peer; starting viewer");
-                        on_share_screen2.lock().unwrap().take();
-                        // screen was shared by peer, which implies that this user should be the viewer
-                        break viewer::start(weak, device, connection);
-                    }
-                }
-            }} => {result}
+}
+
+// Checks if the user should become a viewer based on received packets
+fn on_caster_packet_hook(
+    weak: Weak<App>,
+    device: Arc<VulkanDevice>,
+    conn: Arc<Mutex<Option<Connection>>>,
+) -> anyhow::Result<()> {
+    loop {
+        // sleep for 1 ms to give the other thread time to lock the mutex
+        std::thread::sleep(Duration::from_millis(1));
+        println!("LOOP"); // DEBUG
+        let mut conn_guard = conn.lock().unwrap();
+        let Some(conn) = conn_guard.as_mut() else {
+            drop(conn_guard);
+            return Ok(());
+        };
+        let bytes = match conn
+            .unreliable_receiver
+            .recv_timeout(Duration::from_millis(1))
+        {
+            Ok(bytes) => bytes,
+            Err(netnet::RecvTimeoutError::Timeout) => continue,
+            Err(netnet::RecvTimeoutError::Disconnected) => {
+                bail!("Unreliable receiver channel closed")
+            }
+        };
+        let packet: Packet = wincode::deserialize(&bytes)?;
+        match packet {
+            Packet::Input(_) => {
+                error!("Received input from peer without sharing screen");
+            }
+            // Drops a single packet if Packet::H264 is found, which is likely to be the PicParamSet packet.
+            // TODO: Send PicParamSet and "IAmCaster" signal over reliable QUIC stream
+            Packet::IAmCaster | Packet::H264 { .. } => {
+                info!("Received video packet from peer; starting viewer");
+                weak.upgrade_in_event_loop(|app| {
+                    app.on_share_screen(|| "Peer already selected caster".into());
+                })
+                .unwrap();
+                // screen was shared by peer, which implies that this user should be the viewer
+                break viewer::start(weak, device, conn_guard.take().unwrap());
+            }
         }
     }
+}
+
+fn on_connect(weak: Weak<App>, device: Arc<VulkanDevice>, conn: Connection) -> anyhow::Result<()> {
+    info!("Connected; running caster/viewer selection checks");
+
+    let conn = Arc::new(Mutex::new(Some(conn)));
+
+    on_share_screen_hook(weak.clone(), device.clone(), conn.clone());
+    on_caster_packet_hook(weak, device, conn)?;
+
+    Ok(())
 }
 
 #[tokio::main]
@@ -145,8 +176,8 @@ async fn main() -> anyhow::Result<()> {
         let weak = weak.clone();
         let _: slint::JoinHandle<anyhow::Result<()>> =
             slint::spawn_local(async_compat::Compat::new(async move {
-                let connection = future.await?;
-                on_connect(weak, device, connection).await
+                let conn = future.await?;
+                on_connect(weak, device, conn)
             }))
             .unwrap();
         "".into()
@@ -164,7 +195,7 @@ async fn main() -> anyhow::Result<()> {
                 let _: slint::JoinHandle<anyhow::Result<()>> =
                     slint::spawn_local(async_compat::Compat::new(async move {
                         let connection = future.await?;
-                        on_connect(weak, device, connection).await
+                        on_connect(weak, device, connection)
                     }))
                     .unwrap();
                 "".into()

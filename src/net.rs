@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::net::SocketAddr;
 
 use log::{info, warn};
 use netnet::Connection;
@@ -11,15 +11,16 @@ use crate::{App, common::SERVER_PORT};
 // TODO: audio stream
 
 /// Requires [tokio] runtime despite being sync
-fn track_connection_status(weak: Weak<App>, connection: Arc<Connection>) {
+fn track_connection_status(weak: Weak<App>, conn: &Connection) {
     weak.upgrade_in_event_loop(|app| {
         app.set_connected(true);
         info!("Connected to client");
     })
     .unwrap();
+    let inner_conn = conn.inner().clone();
 
     tokio::task::spawn(async move {
-        let cause = connection.closed().await;
+        let cause = inner_conn.closed().await;
 
         weak.upgrade_in_event_loop(move |app| {
             app.set_connected(false);
@@ -31,32 +32,32 @@ fn track_connection_status(weak: Weak<App>, connection: Arc<Connection>) {
 
 pub fn connect_server(
     weak: Weak<App>,
-) -> anyhow::Result<impl Future<Output = anyhow::Result<Arc<Connection>>>> {
+) -> anyhow::Result<impl Future<Output = anyhow::Result<Connection>>> {
     info!("Creating server");
     let future = netnet::create_server(SERVER_PORT)?;
     info!("Finished creating server");
 
     Ok(async move {
         info!("Waiting for client connection");
-        let connection = Arc::new(future.await?);
+        let conn = future.await?;
         info!("Client connected");
-        track_connection_status(weak, connection.clone());
-        Ok(connection)
+        track_connection_status(weak, &conn);
+        Ok(conn)
     })
 }
 
 pub fn connect_client(
     weak: Weak<App>,
     server_addr: SocketAddr,
-) -> anyhow::Result<impl Future<Output = anyhow::Result<Arc<Connection>>>> {
+) -> anyhow::Result<impl Future<Output = anyhow::Result<Connection>>> {
     info!("Creating client");
     let future = netnet::create_client(server_addr)?;
 
     Ok(async move {
         info!("Connecting to server");
-        let connection = Arc::new(future.await?);
-        info!("Connected to server");        
-        track_connection_status(weak, connection.clone());
-        Ok(connection)
+        let conn = future.await?;
+        info!("Connected to server");
+        track_connection_status(weak, &conn);
+        Ok(conn)
     })
 }

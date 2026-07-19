@@ -2,7 +2,7 @@ use enigo::{Enigo, Keyboard};
 use fps_ticker::Fps;
 use gpu_video::VulkanDevice;
 use log::{debug, info};
-use netnet::Connection;
+use netnet::{Connection, UnreliableReceiver, UnreliableSender};
 use std::sync::{Arc, mpsc};
 use std::time::Instant;
 
@@ -13,48 +13,43 @@ use crate::gpu;
 // TODO: resolution downscaling and frame rate reduction according to the client's monitor
 pub(crate) const FRAME_RATE: u32 = 60;
 
-fn send_chunks(
-    connection: &Connection,
-    mut data: &[u8],
-    frame_index: u64,
+fn send_nal_units(
+    connection: &mut UnreliableSender,
+    mut bytes: &[u8],
     width: u32,
     height: u32,
-) {
-    // max datagram size - (sizeof(width) + sizeof(height) + sizeof(&[u8]) + sizeof(frame_index) + sizeof(fragment_index) + sizeof(total_fragments))
-    let max_chunk_size = connection.max_datagram_size().unwrap() - 36;
-    let mut packet_queue = Vec::with_capacity(data.len().div_ceil(max_chunk_size));
-
-    // TODO: send small NAL units together
+) -> anyhow::Result<()> {
+    // max size - (sizeof(width) + sizeof(height) + sizeof(slice))
+    let fragment_size = connection.max_fragment_size() - 20;
+    let mut send = |unit_bytes: &[u8]| {
+        let nal_unit = wincode::serialize(&Packet::H264 {
+            width,
+            height,
+            bytes: unit_bytes,
+        })
+        .unwrap();
+        connection.send(&nal_unit)
+    };
     let mut i = 4;
-    while data.len() > max_chunk_size {
-        if i >= max_chunk_size || &data[i..usize::min(i + 4, data.len())] == &[0, 0, 0, 1] {
+    while bytes.len() > fragment_size && (i + 4) <= bytes.len() {
+        if &bytes[i..i + 4] == &[0, 0, 0, 1] {
             // NAL unit start found
-            packet_queue.push(&data[..i]);
-            data = &data[i..];
+            send(&bytes[..i])?;
+            bytes = &bytes[i..];
             i = 4;
             continue;
         }
         i += 1;
     }
-    packet_queue.push(data);
-
-    for (i, slice) in packet_queue.iter().enumerate() {
-        let bytes = wincode::serialize(&Packet::H264 {
-            frame_index,
-            fragment_index: i as u32,
-            total_fragments: packet_queue.len() as u32,
-            width,
-            height,
-            bytes: slice,
-        })
-        .unwrap();
-        connection.send_datagram(bytes.into()).unwrap();
+    if bytes.len() > 0 {
+        send(bytes)?;
     }
+    Ok(())
 }
 
 pub fn start_screencast(
     device: Arc<VulkanDevice>,
-    connection: Arc<Connection>,
+    mut connection: UnreliableSender,
 ) -> Result<(), janck::Error> {
     let (frame_sender, frame_receiver) = mpsc::sync_channel::<janck::Frame>(0);
     let video = janck::capture_video(FRAME_RATE as _)?;
@@ -62,7 +57,7 @@ pub fn start_screencast(
     for _ in 0..100 {
         let packet = Packet::IAmCaster;
         let bytes = wincode::serialize(&packet).unwrap();
-        connection.send_datagram(bytes.into()).unwrap();
+        connection.send(&bytes).unwrap();
     }
     std::thread::spawn(move || {
         // Using a separate thread allows a frame to be captured while another one is being processed
@@ -73,7 +68,6 @@ pub fn start_screencast(
     std::thread::spawn(move || {
         let mut encoder = None;
         let fps = Fps::default();
-        let mut frame_index = 0;
 
         // TODO: if janck can capture directly into [wgpu::Texture]s then the entire GPU upload step of encoding can be skipped
         for janck::Frame {
@@ -102,22 +96,21 @@ pub fn start_screencast(
                 encoded.len(),
                 fps.avg()
             );
-            send_chunks(&connection, &encoded, frame_index, width, height);
-            frame_index += 1;
+            send_nal_units(&mut connection, &encoded, width, height).unwrap();
         }
     });
     info!("Started screen cast");
     Ok(())
 }
 
-pub fn start_input_handler(connection: Arc<Connection>) -> anyhow::Result<()> {
+pub fn start_input_handler(mut connection: UnreliableReceiver) -> anyhow::Result<()> {
     info!("Starting input handler");
     let mut enigo = Enigo::new(&enigo::Settings::default())?;
     info!("Created virtual keyboard");
 
-    tokio::task::spawn(async move {
+    std::thread::spawn(move || {
         loop {
-            let bytes = connection.read_datagram().await.unwrap();
+            let bytes = connection.recv().unwrap();
             let Packet::Input(key) = wincode::deserialize(&bytes).unwrap() else {
                 unreachable!();
             };
@@ -131,11 +124,11 @@ pub fn start_input_handler(connection: Arc<Connection>) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn start(device: Arc<VulkanDevice>, connection: Arc<Connection>) -> anyhow::Result<()> {
+pub fn start(device: Arc<VulkanDevice>, connection: Connection) -> anyhow::Result<()> {
     info!("Starting screencast");
-    start_screencast(device, connection.clone())?;
+    start_screencast(device, connection.unreliable_sender)?;
 
     info!("Starting input handler");
-    start_input_handler(connection)?;
+    start_input_handler(connection.unreliable_receiver)?;
     Ok(())
 }
