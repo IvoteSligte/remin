@@ -1,17 +1,15 @@
 use std::{
     io,
     net::{IpAddr, SocketAddr},
-    sync::{Arc, Mutex},
-    time::Duration,
+    sync::Arc,
 };
 
-use anyhow::bail;
-use common::{Packet, SERVER_PORT};
+use common::SERVER_PORT;
 use gpu_video::{
     VulkanDevice, VulkanInstance,
     parameters::{VulkanAdapterDescriptor, VulkanDeviceDescriptor},
 };
-use log::{error, info};
+use log::info;
 use netnet::Connection;
 use slint::{ComponentHandle, Weak};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -63,89 +61,27 @@ fn init_backend() -> anyhow::Result<Arc<VulkanDevice>> {
     Ok(device)
 }
 
-fn on_share_screen_hook(
-    weak: Weak<App>,
-    device: Arc<VulkanDevice>,
-    conn: Arc<Mutex<Option<Connection>>>,
-) {
-    let weak2 = weak.clone();
-    weak.upgrade_in_event_loop(move |app| {
-        app.on_share_screen(move || {
-            weak2
-                .upgrade_in_event_loop(|app| {
-                    app.on_share_screen(|| "'Share Screen' pressed twice".into());
-                })
-                .unwrap();
-
-            info!("Starting caster");
-            let Some(conn) = conn.lock().unwrap().take() else {
-                return "Peer already selected 'Share Screen'".into();
-            };
-            info!("Acquired state");
-            let error = match caster::start(device.clone(), conn) {
-                Ok(()) => "".into(),
-                Err(err) => err.to_string().into(),
-            };
-            error
-        });
-        info!("Set on-share-screen callback");
-    })
-    .unwrap();
-}
-
-// Checks if the user should become a viewer based on received packets
-fn on_caster_packet_hook(
-    weak: Weak<App>,
-    device: Arc<VulkanDevice>,
-    conn: Arc<Mutex<Option<Connection>>>,
-) -> anyhow::Result<()> {
-    loop {
-        // sleep for 1 ms to give the other thread time to lock the mutex
-        std::thread::sleep(Duration::from_millis(1));
-        println!("LOOP"); // DEBUG
-        let mut conn_guard = conn.lock().unwrap();
-        let Some(conn) = conn_guard.as_mut() else {
-            drop(conn_guard);
-            return Ok(());
-        };
-        let bytes = match conn
-            .unreliable_receiver
-            .recv_timeout(Duration::from_millis(1))
-        {
-            Ok(bytes) => bytes,
-            Err(netnet::RecvTimeoutError::Timeout) => continue,
-            Err(netnet::RecvTimeoutError::Disconnected) => {
-                bail!("Unreliable receiver channel closed")
-            }
-        };
-        let packet: Packet = wincode::deserialize(&bytes)?;
-        match packet {
-            Packet::Input(_) => {
-                error!("Received input from peer without sharing screen");
-            }
-            // Drops a single packet if Packet::H264 is found, which is likely to be the PicParamSet packet.
-            // TODO: Send PicParamSet and "IAmCaster" signal over reliable QUIC stream
-            Packet::IAmCaster | Packet::H264 { .. } => {
-                info!("Received video packet from peer; starting viewer");
-                weak.upgrade_in_event_loop(|app| {
-                    app.on_share_screen(|| "Peer already selected caster".into());
-                })
-                .unwrap();
-                // screen was shared by peer, which implies that this user should be the viewer
-                break viewer::start(weak, device, conn_guard.take().unwrap());
-            }
-        }
-    }
-}
-
 fn on_connect(weak: Weak<App>, device: Arc<VulkanDevice>, conn: Connection) -> anyhow::Result<()> {
     info!("Connected; running caster/viewer selection checks");
 
-    let conn = Arc::new(Mutex::new(Some(conn)));
-
-    on_share_screen_hook(weak.clone(), device.clone(), conn.clone());
-    on_caster_packet_hook(weak, device, conn)?;
-
+    let mut once = Some((weak.clone(), device, conn));
+    weak.upgrade_in_event_loop(move |app| {
+        app.on_select_role(move |role| {
+            let (weak, device, conn) = once.take().unwrap();
+            match role.as_str() {
+                "caster" => match caster::start(device, conn) {
+                    Ok(()) => "".into(),
+                    Err(err) => err.to_string().into(),
+                },
+                "viewer" => match viewer::start(weak, device, conn) {
+                    Ok(()) => "".into(),
+                    Err(err) => err.to_string().into(),
+                },
+                _ => unreachable!(),
+            }
+        });
+    })
+    .unwrap();
     Ok(())
 }
 

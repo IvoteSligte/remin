@@ -24,7 +24,7 @@ export component App inherits Window {
 
     // caster/viewer menu
     in property <bool> connected: false;
-    callback share-screen() -> string;
+    callback select-role(role: string) -> string;
 
     // viewer
     in property <image> video-frame <=> viewer.source;
@@ -93,16 +93,38 @@ export component App inherits Window {
         }
     }
 
-    if (view == "share-screen-menu" && connected): FormLayout {
-        FormSubmitButton {
-            text: "Share Screen";
-            validate() => true;
-            submit() => {
-                let error = share-screen();
-                if (error == "") {
-                    root.view = "caster";
+    if (view == "share-screen-menu" && connected): HorizontalLayout {
+        alignment: center;
+        
+        FormLayout {
+            FormSubmitButton {
+                text: "Share Screen";
+                validate() => true;
+                submit() => {
+                    let error = select-role("caster");
+                    if (error == "") {
+                        root.view = "caster";
+                    }
+                    error
                 }
-                error
+            }
+        }
+
+        Rectangle {
+            width: 7%;
+        }
+
+        FormLayout {
+            FormSubmitButton {
+                text: "Watch";
+                validate => true;
+                submit => {
+                    let error = select-role("viewer");
+                    if (error == "") {
+                        root.view = "viewer";
+                    }
+                    error
+                };
             }
         }
     }

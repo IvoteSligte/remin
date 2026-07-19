@@ -22,11 +22,11 @@ pub fn start_renderer(
         app.set_view("viewer".into());
     })?;
 
-    let (packet_sender, mut packet_receiver) = tokio::sync::mpsc::channel(100);
+    let (packet_sender, mut packet_receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(100);
 
     tokio::task::spawn(async move {
         loop {
-            let packet = conn.recv().unwrap();
+            let packet = conn.recv().await.unwrap();
             packet_sender.send(packet).await.unwrap();
         }
     });

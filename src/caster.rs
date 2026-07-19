@@ -108,9 +108,9 @@ pub fn start_input_handler(mut connection: UnreliableReceiver) -> anyhow::Result
     let mut enigo = Enigo::new(&enigo::Settings::default())?;
     info!("Created virtual keyboard");
 
-    std::thread::spawn(move || {
+    tokio::task::spawn(async move {
         loop {
-            let bytes = connection.recv().unwrap();
+            let bytes = connection.recv().await.unwrap();
             let Packet::Input(key) = wincode::deserialize(&bytes).unwrap() else {
                 unreachable!();
             };

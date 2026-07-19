@@ -10,8 +10,8 @@ export component Menu inherits HorizontalLayout {
     FormLayout {
         FormSubmitButton {
             text: "Host";
-            validate => { true };
-            submit => { start-server() };
+            validate => true;
+            submit => start-server();
         }
     }
 
