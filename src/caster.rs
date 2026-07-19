@@ -3,6 +3,7 @@ use fps_ticker::Fps;
 use gpu_video::VulkanDevice;
 use log::{debug, info};
 use netnet::{Connection, UnreliableReceiver, UnreliableSender};
+use slint::platform::Key as SlintKey;
 use std::sync::{Arc, mpsc};
 use std::time::Instant;
 
@@ -114,11 +115,16 @@ pub fn start_input_handler(mut connection: UnreliableReceiver) -> anyhow::Result
             let Packet::Input(key) = wincode::deserialize(&bytes).unwrap() else {
                 unreachable!();
             };
+            let enigo_key = match key.char {
+                c if c == char::from(SlintKey::Shift) => enigo::Key::LShift,
+                c if c == char::from(SlintKey::ShiftR) => enigo::Key::RShift,
+                c if c == char::from(SlintKey::Return) => enigo::Key::Return,
+                c if c == char::from(SlintKey::Control) => enigo::Key::LControl,
+                c if c == char::from(SlintKey::ControlR) => enigo::Key::RControl,
+                c => enigo::Key::Unicode(c),
+            };
             info!("Read {:?}", key);
-            // TODO: add modifier key support (simple key press/release)
-            enigo
-                .key(enigo::Key::Unicode(key.char), key.action.into())
-                .unwrap();
+            enigo.key(enigo_key, key.action.into()).unwrap();
         }
     });
     Ok(())
