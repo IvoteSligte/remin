@@ -2,13 +2,9 @@ use gpu_video::VulkanDevice;
 use log::{debug, info, warn};
 use netnet::{Connection, UnreliableReceiver, UnreliableSender};
 use slint::Weak;
-use std::{sync::Arc, time::Instant};
+use std::{collections::HashSet, sync::Arc, time::Instant};
 
-use crate::{
-    App,
-    common::{Action, Key, Packet},
-    gpu,
-};
+use crate::{App, common::Packet, gpu};
 
 pub fn start_renderer(
     weak: Weak<App>,
@@ -33,7 +29,7 @@ pub fn start_renderer(
         while let Some(bytes) = packet_receiver.recv().await {
             let packet: Packet = wincode::deserialize(&bytes).unwrap();
             match packet {
-                Packet::Input(_) => unreachable!("Client should not receive input packets"),
+                Packet::Input { .. } => warn!("Watcher received an input packet"),
                 Packet::H264 {
                     width,
                     height,
@@ -86,17 +82,21 @@ pub fn start_renderer(
 }
 
 pub fn start_input_handler(app: &App, mut conn: UnreliableSender) {
+    let mut pressed = HashSet::with_capacity(20);
+
     app.on_keyboard_input(move |text, action| {
         // text is only a string because slint does not work with characters
         let Some(char) = text.chars().next() else {
             return;
         };
-        let action = match action {
-            crate::KeyAction::Press => Action::Press,
-            crate::KeyAction::Release => Action::Release,
+        match action {
+            crate::KeyAction::Press => pressed.insert(char),
+            crate::KeyAction::Release => pressed.remove(&char),
         };
-        info!("Key {:?}: '{}' = {}", action, char, char as u32);
-        let packet = Packet::Input(Key { char, action });
+        debug!("Key {:?}: '{}' = {}", action, char, char as u32);
+        let packet = Packet::Input {
+            pressed: pressed.clone(),
+        };
         let bytes = wincode::serialize(&packet).unwrap();
         conn.send(&bytes).unwrap();
     });

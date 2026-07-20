@@ -4,6 +4,8 @@ use gpu_video::VulkanDevice;
 use log::{debug, info};
 use netnet::{Connection, UnreliableReceiver, UnreliableSender};
 use slint::platform::Key as SlintKey;
+use tracing::warn;
+use std::collections::HashSet;
 use std::sync::{Arc, mpsc};
 use std::time::Instant;
 
@@ -98,41 +100,58 @@ pub fn start_screencast(
     Ok(())
 }
 
+fn slint_key_to_enigo(slint: char) -> enigo::Key {
+    match slint {
+        c if c == char::from(SlintKey::Shift) => enigo::Key::LShift,
+        c if c == char::from(SlintKey::ShiftR) => enigo::Key::RShift,
+        c if c == char::from(SlintKey::Return) => enigo::Key::Return,
+        c if c == char::from(SlintKey::Control) => enigo::Key::LControl,
+        c if c == char::from(SlintKey::ControlR) => enigo::Key::RControl,
+        c if c == char::from(SlintKey::UpArrow) => enigo::Key::UpArrow,
+        c if c == char::from(SlintKey::DownArrow) => enigo::Key::DownArrow,
+        c if c == char::from(SlintKey::LeftArrow) => enigo::Key::LeftArrow,
+        c if c == char::from(SlintKey::RightArrow) => enigo::Key::RightArrow,
+        c if c == char::from(SlintKey::F1) => enigo::Key::F1,
+        c if c == char::from(SlintKey::F2) => enigo::Key::F2,
+        c if c == char::from(SlintKey::F3) => enigo::Key::F3,
+        c if c == char::from(SlintKey::F4) => enigo::Key::F4,
+        c if c == char::from(SlintKey::F5) => enigo::Key::F5,
+        c if c == char::from(SlintKey::F6) => enigo::Key::F6,
+        c if c == char::from(SlintKey::F7) => enigo::Key::F7,
+        c if c == char::from(SlintKey::F8) => enigo::Key::F8,
+        c if c == char::from(SlintKey::F9) => enigo::Key::F9,
+        c if c == char::from(SlintKey::F10) => enigo::Key::F10,
+        c => enigo::Key::Unicode(c),
+    }
+}
+
 pub fn start_input_handler(mut connection: UnreliableReceiver) -> anyhow::Result<()> {
     info!("Starting input handler");
     let mut enigo = Enigo::new(&enigo::Settings::default())?;
     info!("Created virtual keyboard");
 
     tokio::task::spawn(async move {
+        let mut prev_pressed = HashSet::new();
+
         loop {
             let bytes = connection.recv().await.unwrap();
-            let Packet::Input(key) = wincode::deserialize(&bytes).unwrap() else {
-                unreachable!();
+            let Packet::Input { pressed } = wincode::deserialize(&bytes).unwrap() else {
+                warn!("Streamer received unreliable non-input packet");
+                continue;
             };
-            let enigo_key = match key.char {
-                c if c == char::from(SlintKey::Shift) => enigo::Key::LShift,
-                c if c == char::from(SlintKey::ShiftR) => enigo::Key::RShift,
-                c if c == char::from(SlintKey::Return) => enigo::Key::Return,
-                c if c == char::from(SlintKey::Control) => enigo::Key::LControl,
-                c if c == char::from(SlintKey::ControlR) => enigo::Key::RControl,
-                c if c == char::from(SlintKey::UpArrow) => enigo::Key::UpArrow,
-                c if c == char::from(SlintKey::DownArrow) => enigo::Key::DownArrow,
-                c if c == char::from(SlintKey::LeftArrow) => enigo::Key::LeftArrow,
-                c if c == char::from(SlintKey::RightArrow) => enigo::Key::RightArrow,
-                c if c == char::from(SlintKey::F1) => enigo::Key::F1,
-                c if c == char::from(SlintKey::F2) => enigo::Key::F2,
-                c if c == char::from(SlintKey::F3) => enigo::Key::F3,
-                c if c == char::from(SlintKey::F4) => enigo::Key::F4,
-                c if c == char::from(SlintKey::F5) => enigo::Key::F5,
-                c if c == char::from(SlintKey::F6) => enigo::Key::F6,
-                c if c == char::from(SlintKey::F7) => enigo::Key::F7,
-                c if c == char::from(SlintKey::F8) => enigo::Key::F8,
-                c if c == char::from(SlintKey::F9) => enigo::Key::F9,
-                c if c == char::from(SlintKey::F10) => enigo::Key::F10,
-                c => enigo::Key::Unicode(c),
-            };
-            info!("Read {:?}", key);
-            enigo.key(enigo_key, key.action.into()).unwrap();
+            let just_released = prev_pressed.difference(&pressed);
+            let just_pressed = pressed.difference(&prev_pressed);
+            for &slint_key in just_released {
+                let enigo_key = slint_key_to_enigo(slint_key);
+                debug!("Released key {:?}", enigo_key);
+                enigo.key(enigo_key, enigo::Direction::Release).unwrap();
+            }
+            for &slint_key in just_pressed {
+                let enigo_key = slint_key_to_enigo(slint_key);
+                debug!("Pressed key {:?}", enigo_key);
+                enigo.key(enigo_key, enigo::Direction::Press).unwrap();
+            }
+            prev_pressed = pressed;
         }
     });
     Ok(())
