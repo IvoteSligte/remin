@@ -1,10 +1,14 @@
 use gpu_video::VulkanDevice;
 use log::{debug, info, warn};
 use netnet::{Connection, UnreliableReceiver, UnreliableSender};
-use slint::Weak;
-use std::{collections::HashSet, sync::Arc, time::Instant};
+use slint::{ComponentHandle, Weak, platform::PointerEventButton};
+use std::{cell::RefCell, ops::DerefMut, rc::Rc, sync::Arc, time::Instant};
 
-use crate::{App, common::Packet, gpu};
+use crate::{
+    App,
+    common::{Input, Packet},
+    gpu,
+};
 
 pub fn start_renderer(
     weak: Weak<App>,
@@ -81,24 +85,61 @@ pub fn start_renderer(
     Ok(())
 }
 
-pub fn start_input_handler(app: &App, mut conn: UnreliableSender) {
-    let mut pressed = HashSet::with_capacity(20);
+fn update_input(state: &Rc<RefCell<(UnreliableSender, Input)>>, mut f: impl FnMut(&mut Input)) {
+    let mut state = state.borrow_mut();
+    let (conn, input) = state.deref_mut();
+    f(input);
+    let packet = Packet::Input(input.clone());
+    let bytes = wincode::serialize(&packet).unwrap();
+    conn.send(&bytes).unwrap();
+}
 
+// TODO: only send an input packet once every slint event loop cycle
+//       this slightly lessens the load on the network without causing input latency
+pub fn start_input_handler(app: &App, conn: UnreliableSender) {
+    // Callbacks are executed sequentially on the main event loop thread,
+    // so an Arc+Mutex is not necessary
+    let state = Rc::new(RefCell::new((conn, Input::default())));
+    let state2 = state.clone();
+    let state3 = state.clone();
+    let state4 = state.clone();
     app.on_keyboard_input(move |text, action| {
-        // text is only a string because slint does not work with characters
+        // `text` is a string because slint does not work with characters
         let Some(char) = text.chars().next() else {
             return;
         };
-        match action {
-            crate::KeyAction::Press => pressed.insert(char),
-            crate::KeyAction::Release => pressed.remove(&char),
-        };
         debug!("Key {:?}: '{}' = {}", action, char, char as u32);
-        let packet = Packet::Input {
-            pressed: pressed.clone(),
-        };
-        let bytes = wincode::serialize(&packet).unwrap();
-        conn.send(&bytes).unwrap();
+        update_input(&state, |input| {
+            match action {
+                crate::KeyAction::Press => input.keys_pressed.insert(char),
+                crate::KeyAction::Release => input.keys_pressed.remove(&char),
+            };
+        });
+    });
+    app.on_mouse_input(move |button, action| {
+        let pressed = action == crate::KeyAction::Press;
+        update_input(&state2, |input| match button {
+            PointerEventButton::Left => input.left_mouse_pressed = pressed,
+            PointerEventButton::Right => input.right_mouse_pressed = pressed,
+            PointerEventButton::Middle => input.middle_mouse_pressed = pressed,
+            _ => (),
+        });
+    });
+    let weak = app.as_weak();
+    app.on_mouse_move(move |position_x, position_y| {
+        let window_size = weak.upgrade().unwrap().window().size();
+        let width = window_size.width as f32;
+        let height = window_size.height as f32;
+
+        update_input(&state3, |input| {
+            input.mouse_position = Some([position_x / width, position_y / height]);
+        });
+    });
+    app.on_scroll_input(move |delta_x, delta_y| {
+        update_input(&state4, |input| {
+            input.scroll[0] += delta_x as f64;
+            input.scroll[1] += delta_y as f64;
+        });
     });
     info!("Registered input handler");
 }

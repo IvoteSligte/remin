@@ -18,16 +18,23 @@ export component App inherits Window {
         if (role == Role.streamer) { View.streamer } else { View.watcher }
     }
 
-    // main menu
+    // Main Menu
     callback start-host(role: Role) -> string;
     callback start-client(host-ip: string) -> { role: Role, error: string };
     pure callback is-socket-address(address: string) -> bool;
 
-    // input
+    // Input
     callback keyboard-input(key: string, action: KeyAction);
+    callback mouse-input(button: PointerEventButton, kind: KeyAction);
+    callback mouse-move(mouse-x: length, mouse-y: length);
+    callback scroll-input(delta-x: length, delta-y: length);
     callback escape();
 
-    // streamer/watcher
+    function should-handle-input(modifiers: KeyboardModifiers) -> bool {
+        view == View.watcher && !modifiers.meta && !modifiers.alt
+    }
+
+    // Streamer/Watcher
     in property <bool> connected: false;
     in property <image> video-frame <=> watcher.source;
 
@@ -51,6 +58,7 @@ export component App inherits Window {
 
     forward-focus: scope;
 
+    // Keyboard input
     scope := FocusScope {
         width: 100%;
         height: 100%;
@@ -68,14 +76,41 @@ export component App inherits Window {
         }
 
         key-pressed(event) => {
-            if (view == View.watcher && !event.modifiers.meta && !event.modifiers.alt) {
+            if (should-handle-input(event.modifiers)) {
                 root.keyboard-input(event.text.to-lowercase(), KeyAction.press);
             }
             accept
         }
         key-released(event) => {
-            if (view == View.watcher && !event.modifiers.meta && !event.modifiers.alt) {
+            if (should-handle-input(event.modifiers)) {
                 root.keyboard-input(event.text.to-lowercase(), KeyAction.release);
+            }
+            accept
+        }
+    }
+
+    // Mouse input
+    touch := TouchArea {
+        enabled: view == View.watcher;
+        
+        width: 100%;
+        height: 100%;
+
+        pointer-event(event) => {
+            if (should-handle-input(event.modifiers)) {
+                if (event.kind == PointerEventKind.move) {
+                    root.mouse-move(self.mouse-x, self.mouse-y);
+                } else if (event.kind == PointerEventKind.down) {
+                    root.mouse-input(event.button, KeyAction.press);
+                } else if (event.kind == PointerEventKind.up) {
+                    root.mouse-input(event.button, KeyAction.release);
+                }
+            }
+        }
+
+        scroll-event(event) => {
+            if (should-handle-input(event.modifiers)) {
+                root.scroll-input(event.delta_x, event.delta_y);
             }
             accept
         }

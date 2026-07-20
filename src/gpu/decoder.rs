@@ -1,4 +1,10 @@
-use std::{sync::{Arc, atomic::{AtomicBool, Ordering}}, time::Instant};
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Instant,
+};
 
 use gpu_video::{
     EncodedInputChunk, VulkanDevice, WgpuTexturesDecoder as WgpuTexturesDecoderH264,

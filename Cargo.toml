@@ -9,7 +9,7 @@ slint-build = "1.17.0"
 
 [dependencies]
 anyhow = "1.0.103"
-enigo = { version = "0.6.1", features = ["wayland"] }
+enigo = { git = "https://github.com/IvoteSligte/enigo.git", features = ["wayland"] }
 log = "0.4.33"
 slint = { version = "1.17.0", features = ["unstable-wgpu-29", "renderer-femtovg-wgpu"] }
 gpu-video = "0.4.0"
