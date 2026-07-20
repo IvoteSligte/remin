@@ -5,12 +5,12 @@ use log::{info, warn};
 use netnet::Connection;
 use slint::Weak;
 
-use crate::{App, Role, common::SERVER_PORT};
+use crate::{App, Role, common::HOST_PORT};
 
 pub const CONTROL_STREAM_ID: u8 = 1;
 
-// TODO: stop client/server video streams when Escape is pressed
-// TODO: stop server input TCP stream when Escape is pressed
+// TODO: stop client/host video streams when Escape is pressed
+// TODO: stop host input TCP stream when Escape is pressed
 // TODO: audio stream
 
 /// Requires [tokio] runtime despite being sync
@@ -60,11 +60,11 @@ impl ControlStream {
     }
 }
 
-pub fn connect_server(
+pub fn host_server(
     weak: Weak<App>,
 ) -> anyhow::Result<impl Future<Output = anyhow::Result<(Connection, ControlStream)>>> {
     info!("Creating server");
-    let future = netnet::create_server(SERVER_PORT)?;
+    let future = netnet::create_server(HOST_PORT)?;
     info!("Finished creating server");
 
     Ok(async move {
@@ -82,12 +82,12 @@ pub fn connect_server(
     })
 }
 
-pub fn connect_client(
+pub fn connect_to_server(
     weak: Weak<App>,
-    server_addr: SocketAddr,
+    host_addr: SocketAddr,
 ) -> anyhow::Result<impl Future<Output = anyhow::Result<(Connection, ControlStream)>>> {
     info!("Creating client");
-    let future = netnet::create_client(server_addr)?;
+    let future = netnet::create_client(host_addr)?;
 
     Ok(async move {
         info!("Connecting to server");

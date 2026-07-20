@@ -4,8 +4,8 @@ import { Role } from "./role.slint";
 export component MainMenu inherits HorizontalLayout {
     alignment: center;
 
-    callback start-server(role: Role) -> string;
-    callback start-client(server-ip: string) -> string;
+    callback start-host(role: Role) -> string;
+    callback start-client(host-ip: string) -> string;
     pure callback is-socket-address(text: string) -> bool;
 
     HorizontalLayout {
@@ -13,7 +13,7 @@ export component MainMenu inherits HorizontalLayout {
             FormSubmitButton {
                 text: "Host as Streamer";
                 validate => true;
-                submit => start-server(Role.streamer);
+                submit => start-host(Role.streamer);
             }
         }
 
@@ -25,7 +25,7 @@ export component MainMenu inherits HorizontalLayout {
             FormSubmitButton {
                 text: "Host as Watcher";
                 validate => true;
-                submit => start-server(Role.watcher);
+                submit => start-host(Role.watcher);
             }
         }
     }
@@ -35,16 +35,16 @@ export component MainMenu inherits HorizontalLayout {
     }
 
     FormLayout {
-        server-ip-field := FormField {
+        host-ip-field := FormField {
             height: 7%;
-            placeholder-text: "Enter server address (e.g. 192.168.1.1)";
+            placeholder-text: "Enter host address (e.g. 192.168.1.1)";
             validate(text) => is-socket-address(text) ? "" : "Invalid address";
         }
 
         FormSubmitButton {
-            text: "Connect";
-            validate() => server-ip-field.is-valid();
-            submit() => start-client(server-ip-field.text);
+            text: "Connect to Host";
+            validate() => host-ip-field.is-valid();
+            submit() => start-client(host-ip-field.text);
         }
     }
 }

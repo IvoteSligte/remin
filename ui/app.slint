@@ -19,8 +19,8 @@ export component App inherits Window {
     }
 
     // main menu
-    callback start-server(role: Role) -> string;
-    callback start-client(server-ip: string) -> { role: Role, error: string };
+    callback start-host(role: Role) -> string;
+    callback start-client(host-ip: string) -> { role: Role, error: string };
     pure callback is-socket-address(address: string) -> bool;
 
     // input
@@ -32,15 +32,15 @@ export component App inherits Window {
     in property <image> video-frame <=> watcher.source;
 
     if view == View.main-menu: MainMenu {
-        start-server(role) => {
-            let error = root.start-server(role);
+        start-host(role) => {
+            let error = root.start-host(role);
             if (error == "") {
                 root.view = role-to-view(role);
             }
             error
         }
-        start-client(server-ip) => {
-            let result = root.start-client(server-ip);
+        start-client(host-ip) => {
+            let result = root.start-client(host-ip);
             if (result.error == "") {
                 root.view = role-to-view(result.role);
             }

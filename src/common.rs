@@ -1,7 +1,7 @@
 use enigo::Direction;
 use wincode::{SchemaRead, SchemaWrite};
 
-pub const SERVER_PORT: u16 = 8084;
+pub const HOST_PORT: u16 = 8084;
 
 #[repr(u8)]
 #[derive(Debug, SchemaRead, SchemaWrite)]

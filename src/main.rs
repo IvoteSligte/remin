@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use common::SERVER_PORT;
+use common::HOST_PORT;
 use gpu_video::{
     VulkanDevice, VulkanInstance,
     parameters::{VulkanAdapterDescriptor, VulkanDeviceDescriptor},
@@ -78,9 +78,9 @@ async fn main() -> anyhow::Result<()> {
     let weak2 = app.as_weak();
 
     // TODO: stop signals
-    app.on_start_server(move |role| {
+    app.on_start_host(move |role| {
         let device = device.clone();
-        let future = match net::connect_server(weak.clone()) {
+        let future = match net::host_server(weak.clone()) {
             Ok(f) => f,
             Err(err) => return err.to_string().into(),
         };
@@ -98,16 +98,16 @@ async fn main() -> anyhow::Result<()> {
         });
         "".into()
     });
-    app.on_start_client(move |server_addr_str| {
+    app.on_start_client(move |host_addr_str| {
         fn wrap_err(err: impl ToString) -> (SharedString, Role) {
             (err.to_string().into(), Role::Watcher) // role is ignored when err != ""
         }
-        let server_addr = match parse_socket_address(&server_addr_str, SERVER_PORT) {
-            Ok(server_addr) => server_addr,
+        let host_addr = match parse_socket_address(&host_addr_str, HOST_PORT) {
+            Ok(ok) => ok,
             Err(err) => return wrap_err(err),
         };
         let device = device2.clone();
-        let future = match net::connect_client(weak2.clone(), server_addr) {
+        let future = match net::connect_to_server(weak2.clone(), host_addr) {
             Ok(f) => f,
             Err(err) => return wrap_err(err),
         };
@@ -115,8 +115,8 @@ async fn main() -> anyhow::Result<()> {
         let result: anyhow::Result<Role> = tokio::runtime::Handle::current().block_on(async move {
             let (connection, mut control_stream) = future.await?;
             info!("Connected");
-            let server_role = control_stream.recv_role().await?;
-            let role = match server_role {
+            let host_role = control_stream.recv_role().await?;
+            let role = match host_role {
                 Role::Streamer => Role::Watcher,
                 Role::Watcher => Role::Streamer,
             };
