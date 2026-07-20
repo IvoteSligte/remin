@@ -14,11 +14,11 @@ use netnet::Connection;
 use slint::{ComponentHandle, Weak};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-mod caster;
+mod streamer;
 mod common;
 mod gpu;
 mod net;
-mod viewer;
+mod watcher;
 
 slint::include_modules!();
 
@@ -62,18 +62,17 @@ fn init_backend() -> anyhow::Result<Arc<VulkanDevice>> {
 }
 
 fn on_connect(weak: Weak<App>, device: Arc<VulkanDevice>, conn: Connection) -> anyhow::Result<()> {
-    info!("Connected; running caster/viewer selection checks");
-
+    info!("Connected");
     let mut once = Some((weak.clone(), device, conn));
     weak.upgrade_in_event_loop(move |app| {
         app.on_select_role(move |role| {
             let (weak, device, conn) = once.take().unwrap();
             match role.as_str() {
-                "caster" => match caster::start(device, conn) {
+                "streamer" => match streamer::start(device, conn) {
                     Ok(()) => "".into(),
                     Err(err) => err.to_string().into(),
                 },
-                "viewer" => match viewer::start(weak, device, conn) {
+                "watcher" => match watcher::start(weak, device, conn) {
                     Ok(()) => "".into(),
                     Err(err) => err.to_string().into(),
                 },

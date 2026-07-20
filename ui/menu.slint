@@ -1,6 +1,6 @@
 import { FormSubmitButton, FormLayout, FormField } from "form.slint";
 
-export component Menu inherits HorizontalLayout {
+export component MainMenu inherits HorizontalLayout {
     alignment: center;
 
     callback start-server() -> string;
@@ -30,6 +30,32 @@ export component Menu inherits HorizontalLayout {
             text: "Connect";
             validate() => server-ip-field.is-valid();
             submit() => start-client(server-ip-field.text);
+        }
+    }
+}
+
+export component RoleSelectMenu inherits HorizontalLayout {
+    alignment: center;
+
+    callback select-role(role: string) -> string;
+
+    FormLayout {
+        FormSubmitButton {
+            text: "Stream";
+            validate() => true;
+            submit() => select-role("streamer");
+        }
+    }
+
+    Rectangle {
+        width: 7%;
+    }
+
+    FormLayout {
+        FormSubmitButton {
+            text: "Watch";
+            validate => true;
+            submit() => select-role("watcher");
         }
     }
 }

@@ -55,11 +55,6 @@ pub fn start_screencast(
     let (frame_sender, frame_receiver) = mpsc::sync_channel::<janck::Frame>(0);
     let video = janck::capture_video(FRAME_RATE as _)?;
 
-    for _ in 0..100 {
-        let packet = Packet::IAmCaster;
-        let bytes = wincode::serialize(&packet).unwrap();
-        connection.send(&bytes).unwrap();
-    }
     std::thread::spawn(move || {
         // Using a separate thread allows a frame to be captured while another one is being processed
         for frame in video {

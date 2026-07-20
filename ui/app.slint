@@ -1,4 +1,4 @@
-import { Menu } from "./menu.slint";
+import { MainMenu, RoleSelectMenu } from "./menu.slint";
 import { Button } from "std-widgets.slint";
 import { FormLayout, FormSubmitButton } from "form.slint";
 
@@ -7,11 +7,8 @@ export component App inherits Window {
     preferred-height: 600px;
 
     // Enables specific components in a mutually exclusive manner
-    // Options: "menu" | "share-screen-menu" | "caster" | "viewer"
-    //
-    // NOTE: currently this is public so that Rust code can set view to "viewer",
-    // but should that be handled through callbacks instead?
-    in-out property <string> view: "menu";
+    // Options: "main-menu" | "role-select-menu" | "streamer" | "watcher"
+    private property <string> view: "main-menu";
 
     // main menu
     callback start-server() -> string;
@@ -22,25 +19,25 @@ export component App inherits Window {
     callback keyboard-input(key: string, action: string);
     callback escape();
 
-    // caster/viewer menu
+    // streamer/watcher menu
     in property <bool> connected: false;
     callback select-role(role: string) -> string;
 
-    // viewer
-    in property <image> video-frame <=> viewer.source;
+    // watcher
+    in property <image> video-frame <=> watcher.source;
 
-    if view == "menu": Menu {
+    if view == "main-menu": MainMenu {
         start-server() => {
             let error = root.start-server();
             if (error == "") {
-                root.view = "share-screen-menu";
+                root.view = "role-select-menu";
             }
             error
         }
         start-client(server-ip) => {
             let error = root.start-client(server-ip);
             if (error == "") {
-                root.view = "share-screen-menu";
+                root.view = "role-select-menu";
             }
             error
         }
@@ -57,73 +54,51 @@ export component App inherits Window {
             keys: @keys(Escape);
             activated => {
                 escape();
-                if (root.view == "menu") {
+                if (root.view == "main-menu") {
                     root.close();
                 } else {
-                    root.view = "menu";
+                    root.view = "main-menu";
                 }
             }
         }
 
         key-pressed(event) => {
-            if (view == "viewer" && !event.modifiers.meta && !event.modifiers.alt) {
+            if (view == "watcher" && !event.modifiers.meta && !event.modifiers.alt) {
                 root.keyboard-input(event.text.to-lowercase(), "pressed");
             }
             accept
         }
         key-released(event) => {
-            if (view == "viewer" && !event.modifiers.meta && !event.modifiers.alt) {
+            if (view == "watcher" && !event.modifiers.meta && !event.modifiers.alt) {
                 root.keyboard-input(event.text.to-lowercase(), "released");
             }
             accept
         }
     }
 
-    if (!connected && view != "menu"): VerticalLayout {
+    if (!connected && view != "main-menu"): VerticalLayout {
+        alignment: center;
+        
         VerticalLayout {
             Text {
+                horizontal-alignment: center;
+                vertical-alignment: center;
                 text: "Waiting for connection...";
             }
         }
     }
 
-    if (view == "share-screen-menu" && connected): HorizontalLayout {
-        alignment: center;
-        
-        FormLayout {
-            FormSubmitButton {
-                text: "Share Screen";
-                validate() => true;
-                submit() => {
-                    let error = select-role("caster");
-                    if (error == "") {
-                        root.view = "caster";
-                    }
-                    error
-                }
+    if (view == "role-select-menu" && connected): RoleSelectMenu {
+        select-role(role) => {
+            let error = root.select-role(role);
+            if (error == "") {
+                root.view = role;
             }
-        }
-
-        Rectangle {
-            width: 7%;
-        }
-
-        FormLayout {
-            FormSubmitButton {
-                text: "Watch";
-                validate => true;
-                submit => {
-                    let error = select-role("viewer");
-                    if (error == "") {
-                        root.view = "viewer";
-                    }
-                    error
-                };
-            }
+            error
         }
     }
 
-    if (view == "caster" && connected): VerticalLayout {
+    if (view == "streamer" && connected): VerticalLayout {
         VerticalLayout {
             Text {
                 text: "Sharing screen";
@@ -132,8 +107,8 @@ export component App inherits Window {
     }
 
     VerticalLayout {
-        visible: view == "viewer" && connected;
+        visible: view == "watcher" && connected;
 
-        viewer := Image { }
+        watcher := Image { }
     }
 }

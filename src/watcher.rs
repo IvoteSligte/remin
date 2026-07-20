@@ -17,11 +17,6 @@ pub fn start_renderer(
 ) -> anyhow::Result<()> {
     info!("Started packet processing loop");
     let mut decoder = None;
-
-    weak.upgrade_in_event_loop(|app| {
-        app.set_view("viewer".into());
-    })?;
-
     let (packet_sender, mut packet_receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(100);
 
     tokio::task::spawn(async move {
@@ -39,7 +34,6 @@ pub fn start_renderer(
             let packet: Packet = wincode::deserialize(&bytes).unwrap();
             match packet {
                 Packet::Input(_) => unreachable!("Client should not receive input packets"),
-                Packet::IAmCaster => (),
                 Packet::H264 {
                     width,
                     height,
