@@ -63,7 +63,7 @@ pub fn start_screencast(
     });
     std::thread::spawn(move || {
         let mut encoder = None;
-        let fps = Fps::default();
+        let mut fps = Fps::default();
 
         // TODO: if janck can capture directly into [wgpu::Texture]s then the entire GPU upload step of encoding can be skipped
         for janck::Frame {
@@ -85,7 +85,6 @@ pub fn start_screencast(
                 "Encoding frame took {:.2}ms",
                 (now - pre_encode).as_micros() as f32 / 1000.0,
             );
-
             fps.tick();
             debug!(
                 "Sending {} byte frame ({width}x{height}, {:.2} fps)",

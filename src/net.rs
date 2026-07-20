@@ -1,10 +1,13 @@
 use std::net::SocketAddr;
 
+use anyhow::bail;
 use log::{info, warn};
 use netnet::Connection;
 use slint::Weak;
 
-use crate::{App, common::SERVER_PORT};
+use crate::{App, Role, common::SERVER_PORT};
+
+pub const CONTROL_STREAM_ID: u8 = 1;
 
 // TODO: stop client/server video streams when Escape is pressed
 // TODO: stop server input TCP stream when Escape is pressed
@@ -30,9 +33,36 @@ fn track_connection_status(weak: Weak<App>, conn: &Connection) {
     });
 }
 
+pub struct ControlStream {
+    sender: netnet::ReliableSender,
+    receiver: netnet::ReliableReceiver,
+}
+
+impl ControlStream {
+    pub async fn send_role(&mut self, role: Role) -> anyhow::Result<()> {
+        let byte = match role {
+            Role::Streamer => 0u8,
+            Role::Watcher => 1u8,
+        };
+        self.sender.send(std::slice::from_ref(&byte)).await
+    }
+
+    pub async fn recv_role(&mut self) -> anyhow::Result<Role> {
+        let bytes = self.receiver.recv().await?;
+        if bytes.len() != 1 {
+            bail!("Expected role byte");
+        }
+        Ok(match bytes[0] {
+            0u8 => Role::Streamer,
+            1u8 => Role::Watcher,
+            _ => bail!("Unknown role: {}", bytes[0]),
+        })
+    }
+}
+
 pub fn connect_server(
     weak: Weak<App>,
-) -> anyhow::Result<impl Future<Output = anyhow::Result<Connection>>> {
+) -> anyhow::Result<impl Future<Output = anyhow::Result<(Connection, ControlStream)>>> {
     info!("Creating server");
     let future = netnet::create_server(SERVER_PORT)?;
     info!("Finished creating server");
@@ -42,14 +72,20 @@ pub fn connect_server(
         let conn = future.await?;
         info!("Client connected");
         track_connection_status(weak, &conn);
-        Ok(conn)
+        let (control_sender, control_receiver) =
+            conn.create_reliable_stream(CONTROL_STREAM_ID).await?;
+        let control_stream = ControlStream {
+            sender: control_sender,
+            receiver: control_receiver,
+        };
+        Ok((conn, control_stream))
     })
 }
 
 pub fn connect_client(
     weak: Weak<App>,
     server_addr: SocketAddr,
-) -> anyhow::Result<impl Future<Output = anyhow::Result<Connection>>> {
+) -> anyhow::Result<impl Future<Output = anyhow::Result<(Connection, ControlStream)>>> {
     info!("Creating client");
     let future = netnet::create_client(server_addr)?;
 
@@ -58,6 +94,14 @@ pub fn connect_client(
         let conn = future.await?;
         info!("Connected to server");
         track_connection_status(weak, &conn);
-        Ok(conn)
+        let (stream_id, control_sender, control_receiver) = conn.accept_reliable_stream().await?;
+        if stream_id != CONTROL_STREAM_ID {
+            bail!("Somehow accepted non-control stream");
+        }
+        let control_stream = ControlStream {
+            sender: control_sender,
+            receiver: control_receiver,
+        };
+        Ok((conn, control_stream))
     })
 }

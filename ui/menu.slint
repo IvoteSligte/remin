@@ -1,17 +1,32 @@
-import { FormSubmitButton, FormLayout, FormField } from "form.slint";
+import { FormSubmitButton, FormLayout, FormField } from "./form.slint";
+import { Role } from "./role.slint";
 
 export component MainMenu inherits HorizontalLayout {
     alignment: center;
 
-    callback start-server() -> string;
+    callback start-server(role: Role) -> string;
     callback start-client(server-ip: string) -> string;
     pure callback is-socket-address(text: string) -> bool;
 
-    FormLayout {
-        FormSubmitButton {
-            text: "Host";
-            validate => true;
-            submit => start-server();
+    HorizontalLayout {
+        FormLayout {
+            FormSubmitButton {
+                text: "Host as Streamer";
+                validate => true;
+                submit => start-server(Role.streamer);
+            }
+        }
+
+        Rectangle {
+            width: 7%;
+        }
+
+        FormLayout {
+            FormSubmitButton {
+                text: "Host as Watcher";
+                validate => true;
+                submit => start-server(Role.watcher);
+            }
         }
     }
 
@@ -30,32 +45,6 @@ export component MainMenu inherits HorizontalLayout {
             text: "Connect";
             validate() => server-ip-field.is-valid();
             submit() => start-client(server-ip-field.text);
-        }
-    }
-}
-
-export component RoleSelectMenu inherits HorizontalLayout {
-    alignment: center;
-
-    callback select-role(role: string) -> string;
-
-    FormLayout {
-        FormSubmitButton {
-            text: "Stream";
-            validate() => true;
-            submit() => select-role("streamer");
-        }
-    }
-
-    Rectangle {
-        width: 7%;
-    }
-
-    FormLayout {
-        FormSubmitButton {
-            text: "Watch";
-            validate => true;
-            submit() => select-role("watcher");
         }
     }
 }

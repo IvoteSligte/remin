@@ -10,3 +10,6 @@
 [submodule "nettime"]
 	path = nettime
 	url = ./nettime
+[submodule "fps_ticker"]
+	path = fps_ticker
+	url = ./fps_ticker

@@ -10,14 +10,13 @@ use gpu_video::{
     parameters::{VulkanAdapterDescriptor, VulkanDeviceDescriptor},
 };
 use log::info;
-use netnet::Connection;
-use slint::{ComponentHandle, Weak};
+use slint::{ComponentHandle, SharedString};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-mod streamer;
 mod common;
 mod gpu;
 mod net;
+mod streamer;
 mod watcher;
 
 slint::include_modules!();
@@ -61,29 +60,6 @@ fn init_backend() -> anyhow::Result<Arc<VulkanDevice>> {
     Ok(device)
 }
 
-fn on_connect(weak: Weak<App>, device: Arc<VulkanDevice>, conn: Connection) -> anyhow::Result<()> {
-    info!("Connected");
-    let mut once = Some((weak.clone(), device, conn));
-    weak.upgrade_in_event_loop(move |app| {
-        app.on_select_role(move |role| {
-            let (weak, device, conn) = once.take().unwrap();
-            match role.as_str() {
-                "streamer" => match streamer::start(device, conn) {
-                    Ok(()) => "".into(),
-                    Err(err) => err.to_string().into(),
-                },
-                "watcher" => match watcher::start(weak, device, conn) {
-                    Ok(()) => "".into(),
-                    Err(err) => err.to_string().into(),
-                },
-                _ => unreachable!(),
-            }
-        });
-    })
-    .unwrap();
-    Ok(())
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::registry()
@@ -102,40 +78,58 @@ async fn main() -> anyhow::Result<()> {
     let weak2 = app.as_weak();
 
     // TODO: stop signals
-    app.on_start_server(move || {
+    app.on_start_server(move |role| {
         let device = device.clone();
         let future = match net::connect_server(weak.clone()) {
             Ok(f) => f,
             Err(err) => return err.to_string().into(),
         };
         let weak = weak.clone();
-        let _: slint::JoinHandle<anyhow::Result<()>> =
-            slint::spawn_local(async_compat::Compat::new(async move {
-                let conn = future.await?;
-                on_connect(weak, device, conn)
-            }))
-            .unwrap();
+        // FIXME: do not ignore errors
+        tokio::task::spawn(async move {
+            let (conn, mut control_stream) = future.await?;
+            control_stream.send_role(role).await?;
+            info!("Connected");
+            match role {
+                // TODO: show error message from start (if any) to user
+                Role::Streamer => streamer::start(device, conn),
+                Role::Watcher => watcher::start(weak, device, conn),
+            }
+        });
         "".into()
     });
     app.on_start_client(move |server_addr_str| {
-        match parse_socket_address(&server_addr_str, SERVER_PORT) {
-            Ok(server_addr) => {
-                // TODO: handle errors instead of unwrapping
-                let device = device2.clone();
-                let future = match net::connect_client(weak2.clone(), server_addr) {
-                    Ok(f) => f,
-                    Err(err) => return err.to_string().into(),
-                };
-                let weak = weak2.clone();
-                let _: slint::JoinHandle<anyhow::Result<()>> =
-                    slint::spawn_local(async_compat::Compat::new(async move {
-                        let connection = future.await?;
-                        on_connect(weak, device, connection)
-                    }))
-                    .unwrap();
-                "".into()
+        fn wrap_err(err: impl ToString) -> (SharedString, Role) {
+            (err.to_string().into(), Role::Watcher) // role is ignored when err != ""
+        }
+        let server_addr = match parse_socket_address(&server_addr_str, SERVER_PORT) {
+            Ok(server_addr) => server_addr,
+            Err(err) => return wrap_err(err),
+        };
+        let device = device2.clone();
+        let future = match net::connect_client(weak2.clone(), server_addr) {
+            Ok(f) => f,
+            Err(err) => return wrap_err(err),
+        };
+        let weak = weak2.clone();
+        let result: anyhow::Result<Role> = tokio::runtime::Handle::current().block_on(async move {
+            let (connection, mut control_stream) = future.await?;
+            info!("Connected");
+            let server_role = control_stream.recv_role().await?;
+            let role = match server_role {
+                Role::Streamer => Role::Watcher,
+                Role::Watcher => Role::Streamer,
+            };
+            match role {
+                // TODO: show error message from start (if any) to user
+                Role::Streamer => streamer::start(device, connection)?,
+                Role::Watcher => watcher::start(weak, device, connection)?,
             }
-            Err(err) => err.to_string().into(),
+            Ok(role)
+        });
+        match result {
+            Ok(role) => ("".into(), role),
+            Err(err) => wrap_err(err),
         }
     });
 

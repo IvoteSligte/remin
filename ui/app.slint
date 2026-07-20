@@ -1,45 +1,50 @@
-import { MainMenu, RoleSelectMenu } from "./menu.slint";
+import { MainMenu } from "./menu.slint";
 import { Button } from "std-widgets.slint";
-import { FormLayout, FormSubmitButton } from "form.slint";
+import { FormLayout, FormSubmitButton } from "./form.slint";
+import { Role } from "./role.slint";
+
+export enum View { main-menu, streamer, watcher }
+
+export enum KeyAction { press, release }
 
 export component App inherits Window {
     preferred-width: 800px;
     preferred-height: 600px;
 
     // Enables specific components in a mutually exclusive manner
-    // Options: "main-menu" | "role-select-menu" | "streamer" | "watcher"
-    private property <string> view: "main-menu";
+    private property <View> view: View.main-menu;
+
+    function role-to-view(role: Role) -> View {
+        if (role == Role.streamer) { View.streamer } else { View.watcher }
+    }
 
     // main menu
-    callback start-server() -> string;
-    callback start-client(server-ip: string) -> string;
+    callback start-server(role: Role) -> string;
+    callback start-client(server-ip: string) -> { role: Role, error: string };
     pure callback is-socket-address(address: string) -> bool;
 
     // input
-    callback keyboard-input(key: string, action: string);
+    callback keyboard-input(key: string, action: KeyAction);
     callback escape();
 
-    // streamer/watcher menu
+    // streamer/watcher
     in property <bool> connected: false;
-    callback select-role(role: string) -> string;
-
-    // watcher
     in property <image> video-frame <=> watcher.source;
 
-    if view == "main-menu": MainMenu {
-        start-server() => {
-            let error = root.start-server();
+    if view == View.main-menu: MainMenu {
+        start-server(role) => {
+            let error = root.start-server(role);
             if (error == "") {
-                root.view = "role-select-menu";
+                root.view = role-to-view(role);
             }
             error
         }
         start-client(server-ip) => {
-            let error = root.start-client(server-ip);
-            if (error == "") {
-                root.view = "role-select-menu";
+            let result = root.start-client(server-ip);
+            if (result.error == "") {
+                root.view = role-to-view(result.role);
             }
-            error
+            result.error
         }
         is-socket-address(address) => root.is-socket-address(address);
     }
@@ -54,31 +59,31 @@ export component App inherits Window {
             keys: @keys(Escape);
             activated => {
                 escape();
-                if (root.view == "main-menu") {
+                if (root.view == View.main-menu) {
                     root.close();
                 } else {
-                    root.view = "main-menu";
+                    root.view = View.main-menu;
                 }
             }
         }
 
         key-pressed(event) => {
-            if (view == "watcher" && !event.modifiers.meta && !event.modifiers.alt) {
-                root.keyboard-input(event.text.to-lowercase(), "pressed");
+            if (view == View.watcher && !event.modifiers.meta && !event.modifiers.alt) {
+                root.keyboard-input(event.text.to-lowercase(), KeyAction.press);
             }
             accept
         }
         key-released(event) => {
-            if (view == "watcher" && !event.modifiers.meta && !event.modifiers.alt) {
-                root.keyboard-input(event.text.to-lowercase(), "released");
+            if (view == View.watcher && !event.modifiers.meta && !event.modifiers.alt) {
+                root.keyboard-input(event.text.to-lowercase(), KeyAction.release);
             }
             accept
         }
     }
 
-    if (!connected && view != "main-menu"): VerticalLayout {
+    if (!connected && view != View.main-menu): VerticalLayout {
         alignment: center;
-        
+
         VerticalLayout {
             Text {
                 horizontal-alignment: center;
@@ -87,18 +92,7 @@ export component App inherits Window {
             }
         }
     }
-
-    if (view == "role-select-menu" && connected): RoleSelectMenu {
-        select-role(role) => {
-            let error = root.select-role(role);
-            if (error == "") {
-                root.view = role;
-            }
-            error
-        }
-    }
-
-    if (view == "streamer" && connected): VerticalLayout {
+    if (view == View.streamer && connected): VerticalLayout {
         VerticalLayout {
             Text {
                 text: "Sharing screen";
@@ -107,7 +101,7 @@ export component App inherits Window {
     }
 
     VerticalLayout {
-        visible: view == "watcher" && connected;
+        visible: view == View.watcher && connected;
 
         watcher := Image { }
     }

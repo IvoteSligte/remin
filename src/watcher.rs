@@ -27,7 +27,7 @@ pub fn start_renderer(
     });
 
     tokio::task::spawn(async move {
-        let frames_per_second = fps_ticker::Fps::default();
+        let mut frames_per_second = fps_ticker::Fps::default();
         let mut last_frame_instant = Instant::now();
 
         while let Some(bytes) = packet_receiver.recv().await {
@@ -91,15 +91,12 @@ pub fn start_input_handler(app: &App, mut conn: UnreliableSender) {
         let Some(char) = text.chars().next() else {
             return;
         };
-        info!("Key {}: '{}' = {}", action, char, char as u32);
-        let packet = Packet::Input(Key {
-            char,
-            action: if action == "pressed" {
-                Action::Press
-            } else {
-                Action::Release
-            },
-        });
+        let action = match action {
+            crate::KeyAction::Press => Action::Press,
+            crate::KeyAction::Release => Action::Release,
+        };
+        info!("Key {:?}: '{}' = {}", action, char, char as u32);
+        let packet = Packet::Input(Key { char, action });
         let bytes = wincode::serialize(&packet).unwrap();
         conn.send(&bytes).unwrap();
     });
