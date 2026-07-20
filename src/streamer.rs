@@ -119,6 +119,16 @@ pub fn start_input_handler(mut connection: UnreliableReceiver) -> anyhow::Result
                 c if c == char::from(SlintKey::DownArrow) => enigo::Key::DownArrow,
                 c if c == char::from(SlintKey::LeftArrow) => enigo::Key::LeftArrow,
                 c if c == char::from(SlintKey::RightArrow) => enigo::Key::RightArrow,
+                c if c == char::from(SlintKey::F1) => enigo::Key::F1,
+                c if c == char::from(SlintKey::F2) => enigo::Key::F2,
+                c if c == char::from(SlintKey::F3) => enigo::Key::F3,
+                c if c == char::from(SlintKey::F4) => enigo::Key::F4,
+                c if c == char::from(SlintKey::F5) => enigo::Key::F5,
+                c if c == char::from(SlintKey::F6) => enigo::Key::F6,
+                c if c == char::from(SlintKey::F7) => enigo::Key::F7,
+                c if c == char::from(SlintKey::F8) => enigo::Key::F8,
+                c if c == char::from(SlintKey::F9) => enigo::Key::F9,
+                c if c == char::from(SlintKey::F10) => enigo::Key::F10,
                 c => enigo::Key::Unicode(c),
             };
             info!("Read {:?}", key);
