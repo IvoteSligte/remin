@@ -9,7 +9,9 @@ slint-build = "1.17.0"
 
 [dependencies]
 anyhow = "1.0.103"
-enigo = { git = "https://github.com/IvoteSligte/enigo.git", features = ["wayland"] }
+# Using the Git because it contains a patch for Wayland.
+# TODO: switch back to crates.io once 0.6.2 comes out
+enigo = { git = "https://github.com/enigo-rs/enigo.git", features = ["wayland"] }
 log = "0.4.33"
 slint = { version = "1.17.0", features = ["unstable-wgpu-29", "unstable-winit-030", "backend-winit", "renderer-femtovg-wgpu"] }
 gpu-video = "0.4.0"
