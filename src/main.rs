@@ -1,7 +1,8 @@
 use std::{
     io,
     net::{IpAddr, SocketAddr},
-    sync::Arc,
+    rc::Rc,
+    sync::{Arc, OnceLock},
 };
 
 use common::HOST_PORT;
@@ -9,8 +10,8 @@ use gpu_video::{
     VulkanDevice, VulkanInstance,
     parameters::{VulkanAdapterDescriptor, VulkanDeviceDescriptor},
 };
-use log::info;
-use slint::{ComponentHandle, SharedString};
+use log::{info, warn};
+use slint::{ComponentHandle, SharedString, winit_030::CustomApplicationHandler};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod common;
@@ -40,7 +41,34 @@ fn parse_socket_address(text: &str, default_port: u16) -> io::Result<SocketAddr>
     })
 }
 
-fn init_backend() -> anyhow::Result<Arc<VulkanDevice>> {
+/// *Must* be created in the same thread that creates the [App] itself.
+struct ApplicationHandler(Rc<OnceLock<App>>);
+
+impl CustomApplicationHandler for ApplicationHandler {
+    fn device_event(
+        &mut self,
+        _event_loop: &slint::winit_030::winit::event_loop::ActiveEventLoop,
+        _device_id: slint::winit_030::winit::event::DeviceId,
+        event: slint::winit_030::winit::event::DeviceEvent,
+    ) -> slint::winit_030::EventResult {
+        match event {
+            slint::winit_030::winit::event::DeviceEvent::MouseMotion { delta: (x, y) } => {
+                match self.0.get() {
+                    Some(app) => {
+                        if app.get_view() == View::Watcher {
+                            app.invoke_mouse_move(x as f32, y as f32);
+                        }
+                    }
+                    None => warn!("Received DeviceEvent::MouseMotion before App creation"),
+                }
+            }
+            _ => (),
+        }
+        slint::winit_030::EventResult::Propagate
+    }
+}
+
+fn init_backend(app_placeholder: Rc<OnceLock<App>>) -> anyhow::Result<Arc<VulkanDevice>> {
     // TODO: integrate Slint's preferred options for creating instance, adapter, device, and queue
     info!("Creating Vulkan instance");
     let instance = VulkanInstance::new()?;
@@ -57,6 +85,7 @@ fn init_backend() -> anyhow::Result<Arc<VulkanDevice>> {
             device: device.wgpu_device(),
             queue: device.wgpu_queue(),
         })
+        .with_winit_custom_application_handler(ApplicationHandler(app_placeholder))
         .select()?;
     Ok(device)
 }
@@ -68,17 +97,19 @@ async fn main() -> anyhow::Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let device = init_backend()?;
+    let app_slot = Rc::new(OnceLock::new());
+    let device = init_backend(app_slot.clone())?;
     let device2 = device.clone();
 
     info!("Creating app");
-    let app = App::new()?;
-    app.on_is_socket_address(|text| parse_socket_address(&text, 0).is_ok());
+    let _ = app_slot.set(App::new()?);
+    let app = app_slot.get().unwrap();
 
     let weak = app.as_weak();
     let weak2 = app.as_weak();
 
-    // TODO: stop signals
+    app.on_is_socket_address(|text| parse_socket_address(&text, 0).is_ok());
+    // TODO: stop signals or stop awaiting
     app.on_start_host(move |role| {
         let device = device.clone();
         let future = match net::host_server(weak.clone()) {

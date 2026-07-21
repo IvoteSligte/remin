@@ -12,7 +12,7 @@ export component App inherits Window {
     preferred-height: 600px;
 
     // Enables specific components in a mutually exclusive manner
-    private property <View> view: View.main-menu;
+    out property <View> view: View.main-menu;
 
     function role-to-view(role: Role) -> View {
         if (role == Role.streamer) { View.streamer } else { View.watcher }
@@ -26,7 +26,7 @@ export component App inherits Window {
     // Input
     callback keyboard-input(key: string, action: KeyAction);
     callback mouse-input(button: PointerEventButton, kind: KeyAction);
-    callback mouse-move(mouse-x: length, mouse-y: length);
+    callback mouse-move(delta-x: length, delta-y: length);
     callback scroll-input(delta-x: length, delta-y: length);
     callback escape();
 
@@ -98,13 +98,14 @@ export component App inherits Window {
 
         pointer-event(event) => {
             if (should-handle-input(event.modifiers)) {
-                if (event.kind == PointerEventKind.move) {
-                    root.mouse-move(self.mouse-x, self.mouse-y);
-                } else if (event.kind == PointerEventKind.down) {
+                if (event.kind == PointerEventKind.down) {
                     root.mouse-input(event.button, KeyAction.press);
                 } else if (event.kind == PointerEventKind.up) {
                     root.mouse-input(event.button, KeyAction.release);
                 }
+                // mouse-move is handled by Rust because Slint only provides absolute mouse coordinates,
+                // which means that when playing a first-person shooter remotely (for example),
+                // the character could otherwise only turn as much as the window bounds allow
             }
         }
 

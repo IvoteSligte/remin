@@ -206,18 +206,23 @@ pub fn start_input_handler(
                     )
                     .unwrap();
             }
-            if input.mouse_position.is_some() && input.mouse_position != prev_input.mouse_position {
-                let [fraction_x, fraction_y] = input.mouse_position.unwrap();
+            if input.mouse_position != prev_input.mouse_position {
+                let [normalized_x, normalized_y] = input.mouse_position;
+                let [prev_normalized_x, prev_normalized_y] = prev_input.mouse_position;
+                let diff_x = normalized_x - prev_normalized_x;
+                let diff_y = normalized_y - prev_normalized_y;
                 // enigo.main_display().size() can be used to get display dimensions on most devices,
-                // but it does not seem to work on Wayland, so we use the screen capture dimensions
-                let position_x = (screen_width as f64 * fraction_x as f64) as i32;
-                let position_y = (screen_height as f64 * fraction_y as f64) as i32;
+                // but it does not seem to work on Wayland, so we use the screen capture dimensions.
+                //
+                // The offset must be between [i16::MIN, i64::MAX] on some platforms, so limit to that.
+                let offset_x = (screen_width as f64 * diff_x) as i16 as i32;
+                let offset_y = (screen_height as f64 * diff_y) as i16 as i32;
                 enigo
-                    .move_mouse(position_x, position_y, enigo::Coordinate::Abs)
+                    .move_mouse(offset_x, offset_y, enigo::Coordinate::Rel)
                     .unwrap();
                 debug!(
-                    "Mouse moved to ({},{}) {:.3},{:.3}",
-                    position_x, position_y, fraction_x, fraction_y
+                    "Mouse moved by ({},{}) {:.3},{:.3}",
+                    offset_x, offset_y, diff_x, diff_y
                 );
             }
             if input.scroll != prev_input.scroll {

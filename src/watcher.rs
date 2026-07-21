@@ -1,4 +1,3 @@
-use enigo::{Enigo, Mouse as _};
 use gpu_video::VulkanDevice;
 use log::{debug, info, warn};
 use netnet::{Connection, UnreliableReceiver, UnreliableSender};
@@ -95,8 +94,7 @@ fn update_input(state: &Rc<RefCell<(UnreliableSender, Input)>>, mut f: impl FnMu
     conn.send(&bytes).unwrap();
 }
 
-// TODO: only send an input packet once every slint event loop cycle
-//       this slightly lessens the load on the network without causing input latency
+// Note that running two instances of remin locally (one host, one client) causes a feedback loop.
 pub fn start_input_handler(app: &App, conn: UnreliableSender) {
     info!("Acquiring winit window handle");
     let window = tokio::runtime::Handle::current()
@@ -105,16 +103,15 @@ pub fn start_input_handler(app: &App, conn: UnreliableSender) {
     // TODO: unlock and unhide cursor on_escape
     {
         use slint::winit_030::winit::window::CursorGrabMode;
-        info!("Trying to lock cursor position");
-        if let Err(err) = window.set_cursor_grab(CursorGrabMode::Locked) {
-            warn!("Failed to lock cursor to window: {err}");
-            if let Err(err) = window.set_cursor_grab(CursorGrabMode::Confined) {
-                warn!("Failed to confine cursor to window: {err}");
+        info!("Trying to confine cursor to window");
+        if let Err(err) = window.set_cursor_grab(CursorGrabMode::Confined) {
+            warn!("Failed to confine cursor to window: {err}");
+            if let Err(err) = window.set_cursor_grab(CursorGrabMode::Locked) {
+                warn!("Failed to lock cursor to window (fallback): {err}");
             };
         };
         window.set_cursor_visible(false);
     }
-    let mut enigo = Enigo::new(&enigo::Settings::default()).unwrap();
 
     // Callbacks are executed sequentially on the main event loop thread,
     // so an Arc+Mutex is not necessary
@@ -146,25 +143,13 @@ pub fn start_input_handler(app: &App, conn: UnreliableSender) {
         });
     });
     let weak = app.as_weak();
-    app.on_mouse_move(move |position_x, position_y| {
+    app.on_mouse_move(move |delta_x, delta_y| {
         let window_size = weak.upgrade().unwrap().window().size();
-        let width = window_size.width as f64;
-        let height = window_size.height as f64;
-
         update_input(&state3, |input| {
-            input.mouse_position = Some([
-                (position_x as f64 / width) as f32,
-                (position_y as f64 / height) as f32,
-            ]);
+            input.mouse_position[0] += delta_x as f64 / window_size.width as f64;
+            input.mouse_position[1] += delta_y as f64 / window_size.height as f64;
         });
-        // move mouse back to center
-        enigo
-            .move_mouse(
-                (window_size.width / 2) as i32,
-                (window_size.height / 2) as i32,
-                enigo::Coordinate::Abs,
-            )
-            .unwrap();
+        debug!("Moved remote mouse by {delta_x},{delta_y}");
     });
     app.on_scroll_input(move |delta_x, delta_y| {
         update_input(&state4, |input| {
