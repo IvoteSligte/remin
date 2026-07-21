@@ -1,7 +1,8 @@
+use enigo::{Enigo, Mouse as _};
 use gpu_video::VulkanDevice;
 use log::{debug, info, warn};
 use netnet::{Connection, UnreliableReceiver, UnreliableSender};
-use slint::{ComponentHandle, Weak, platform::PointerEventButton};
+use slint::{ComponentHandle, Weak, platform::PointerEventButton, winit_030::WinitWindowAccessor};
 use std::{cell::RefCell, ops::DerefMut, rc::Rc, sync::Arc, time::Instant};
 
 use crate::{
@@ -97,12 +98,31 @@ fn update_input(state: &Rc<RefCell<(UnreliableSender, Input)>>, mut f: impl FnMu
 // TODO: only send an input packet once every slint event loop cycle
 //       this slightly lessens the load on the network without causing input latency
 pub fn start_input_handler(app: &App, conn: UnreliableSender) {
+    info!("Acquiring winit window handle");
+    let window = tokio::runtime::Handle::current()
+        .block_on(app.window().winit_window())
+        .unwrap();
+    // TODO: unlock and unhide cursor on_escape
+    {
+        use slint::winit_030::winit::window::CursorGrabMode;
+        info!("Trying to lock cursor position");
+        if let Err(err) = window.set_cursor_grab(CursorGrabMode::Locked) {
+            warn!("Failed to lock cursor to window: {err}");
+            if let Err(err) = window.set_cursor_grab(CursorGrabMode::Confined) {
+                warn!("Failed to confine cursor to window: {err}");
+            };
+        };
+        window.set_cursor_visible(false);
+    }
+    let mut enigo = Enigo::new(&enigo::Settings::default()).unwrap();
+
     // Callbacks are executed sequentially on the main event loop thread,
     // so an Arc+Mutex is not necessary
     let state = Rc::new(RefCell::new((conn, Input::default())));
     let state2 = state.clone();
     let state3 = state.clone();
     let state4 = state.clone();
+
     app.on_keyboard_input(move |text, action| {
         // `text` is a string because slint does not work with characters
         let Some(char) = text.chars().next() else {
@@ -128,12 +148,23 @@ pub fn start_input_handler(app: &App, conn: UnreliableSender) {
     let weak = app.as_weak();
     app.on_mouse_move(move |position_x, position_y| {
         let window_size = weak.upgrade().unwrap().window().size();
-        let width = window_size.width as f32;
-        let height = window_size.height as f32;
+        let width = window_size.width as f64;
+        let height = window_size.height as f64;
 
         update_input(&state3, |input| {
-            input.mouse_position = Some([position_x / width, position_y / height]);
+            input.mouse_position = Some([
+                (position_x as f64 / width) as f32,
+                (position_y as f64 / height) as f32,
+            ]);
         });
+        // move mouse back to center
+        enigo
+            .move_mouse(
+                (window_size.width / 2) as i32,
+                (window_size.height / 2) as i32,
+                enigo::Coordinate::Abs,
+            )
+            .unwrap();
     });
     app.on_scroll_input(move |delta_x, delta_y| {
         update_input(&state4, |input| {

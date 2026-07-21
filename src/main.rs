@@ -50,6 +50,7 @@ fn init_backend() -> anyhow::Result<Arc<VulkanDevice>> {
     let device = adapter.create_device(&VulkanDeviceDescriptor::default())?;
     info!("Creating Slint backend from Vulkan objects");
     slint::BackendSelector::new()
+        .backend_name("winit".to_string())
         .require_wgpu_29(slint::wgpu_29::WGPUConfiguration::Manual {
             instance: instance.wgpu_instance(),
             adapter: device.wgpu_adapter(),
