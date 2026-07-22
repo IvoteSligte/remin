@@ -162,6 +162,12 @@ impl Decoder {
             "Creating the NV12-to-RGBA command buffer took {:.2}ms",
             (Instant::now() - command_encoder_start).as_micros() as f32 / 1000.0
         );
+        command_buffer.on_submitted_work_done(move || {
+            trace!(
+                "NV12-to-RGBA decoding pipeline took {:.2}ms",
+                (Instant::now() - command_encoder_start).as_micros() as f32 / 1000.0
+            );
+        });
         let submit_start = Instant::now();
         self.queue.submit(Some(command_buffer));
         trace!(

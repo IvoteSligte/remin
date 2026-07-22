@@ -1,5 +1,5 @@
 use gpu_video::VulkanDevice;
-use log::{debug, info, warn};
+use log::{debug, info, trace, warn};
 use netnet::{Connection, UnreliableReceiver, UnreliableSender};
 use slint::{ComponentHandle, Weak, platform::PointerEventButton, winit_030::WinitWindowAccessor};
 use std::{cell::RefCell, ops::DerefMut, rc::Rc, sync::Arc, time::Instant};
@@ -145,11 +145,13 @@ pub fn start_input_handler(app: &App, conn: UnreliableSender) {
     let weak = app.as_weak();
     app.on_mouse_move(move |delta_x, delta_y| {
         let window_size = weak.upgrade().unwrap().window().size();
+        let delta_x = str::parse::<f64>(&delta_x).unwrap() / window_size.width as f64;
+        let delta_y = str::parse::<f64>(&delta_y).unwrap() / window_size.height as f64;
         update_input(&state3, |input| {
-            input.mouse_position[0] += delta_x as f64 / window_size.width as f64;
-            input.mouse_position[1] += delta_y as f64 / window_size.height as f64;
+            input.mouse_position[0] += delta_x;
+            input.mouse_position[1] += delta_y;
         });
-        debug!("Moved remote mouse by {delta_x},{delta_y}");
+        trace!("Moving remote mouse by {delta_x:.4},{delta_y:.4}");
     });
     app.on_scroll_input(move |delta_x, delta_y| {
         update_input(&state4, |input| {

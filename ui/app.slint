@@ -26,7 +26,7 @@ export component App inherits Window {
     // Input
     callback keyboard-input(key: string, action: KeyAction);
     callback mouse-input(button: PointerEventButton, kind: KeyAction);
-    callback mouse-move(delta-x: length, delta-y: length);
+    callback mouse-move(delta-x: string, delta-y: string);
     callback scroll-input(delta-x: length, delta-y: length);
     callback escape();
 
@@ -35,6 +35,7 @@ export component App inherits Window {
     }
 
     // Streamer/Watcher
+    in property <int> ping: 9999;
     in property <bool> connected: false;
     in property <image> video-frame <=> watcher.source;
 
@@ -92,7 +93,7 @@ export component App inherits Window {
     // Mouse input
     touch := TouchArea {
         enabled: view == View.watcher;
-        
+
         width: 100%;
         height: 100%;
 
@@ -130,8 +131,14 @@ export component App inherits Window {
     }
     if (view == View.streamer && connected): VerticalLayout {
         VerticalLayout {
+            alignment: start;
+
             Text {
                 text: "Sharing screen";
+            }
+
+            Text {
+                text: "Ping: " + ping;
             }
         }
     }

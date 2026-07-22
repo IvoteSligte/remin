@@ -2,15 +2,16 @@ use anyhow::Context;
 use enigo::{Enigo, Keyboard, Mouse};
 use fps_ticker::Fps;
 use gpu_video::VulkanDevice;
-use log::{debug, info};
+use log::{debug, info, trace};
 use netnet::{Connection, UnreliableReceiver, UnreliableSender};
+use slint::Weak;
 use slint::platform::Key as SlintKey;
 use std::sync::{Arc, mpsc};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tracing::warn;
 
 use crate::common::{Input, Packet};
-use crate::gpu;
+use crate::{App, gpu};
 
 // TODO: UI element for adjusting these parameters
 // TODO: resolution downscaling and frame rate reduction according to the client's monitor
@@ -179,6 +180,7 @@ pub fn start_input_handler(
                 debug!("Pressed key {:?}", enigo_key);
                 enigo.key(enigo_key, enigo::Direction::Press).unwrap();
             }
+            prev_input.keys_pressed = input.keys_pressed;
             if input.left_mouse_pressed != prev_input.left_mouse_pressed {
                 debug!("Left mouse pressed: {}", input.left_mouse_pressed);
                 enigo
@@ -187,6 +189,7 @@ pub fn start_input_handler(
                         direction_from_pressed(input.left_mouse_pressed),
                     )
                     .unwrap();
+                prev_input.left_mouse_pressed = input.left_mouse_pressed;
             }
             if input.middle_mouse_pressed != prev_input.middle_mouse_pressed {
                 debug!("Middle mouse pressed: {}", input.left_mouse_pressed);
@@ -196,6 +199,7 @@ pub fn start_input_handler(
                         direction_from_pressed(input.middle_mouse_pressed),
                     )
                     .unwrap();
+                prev_input.middle_mouse_pressed = input.middle_mouse_pressed;
             }
             if input.right_mouse_pressed != prev_input.right_mouse_pressed {
                 debug!("Right mouse pressed: {}", input.left_mouse_pressed);
@@ -205,6 +209,7 @@ pub fn start_input_handler(
                         direction_from_pressed(input.right_mouse_pressed),
                     )
                     .unwrap();
+                prev_input.right_mouse_pressed = input.right_mouse_pressed;
             }
             if input.mouse_position != prev_input.mouse_position {
                 let [normalized_x, normalized_y] = input.mouse_position;
@@ -214,16 +219,26 @@ pub fn start_input_handler(
                 // enigo.main_display().size() can be used to get display dimensions on most devices,
                 // but it does not seem to work on Wayland, so we use the screen capture dimensions.
                 //
-                // The offset must be between [i16::MIN, i64::MAX] on some platforms, so limit to that.
+                // The offset must be between [i16::MIN, i64::MAX] on some platforms, so restrict it to that.
                 let offset_x = (screen_width as f64 * diff_x) as i16 as i32;
                 let offset_y = (screen_height as f64 * diff_y) as i16 as i32;
-                enigo
-                    .move_mouse(offset_x, offset_y, enigo::Coordinate::Rel)
-                    .unwrap();
-                debug!(
-                    "Mouse moved by ({},{}) {:.3},{:.3}",
-                    offset_x, offset_y, diff_x, diff_y
-                );
+
+                // Offset may be (0,0) due to rounding
+                if offset_x != 0 || offset_y != 0 {
+                    enigo
+                        .move_mouse(offset_x, offset_y, enigo::Coordinate::Rel)
+                        .unwrap();
+                    trace!(
+                        "Mouse moved by {},{}",
+                        offset_x as f64 / screen_width as f64,
+                        offset_y as f64 / screen_height as f64
+                    );
+                    // The offset has been rounded, which prev_input = input would not account for.
+                    prev_input.mouse_position = [
+                        prev_normalized_x + offset_x as f64 / screen_width as f64,
+                        prev_normalized_y + offset_y as f64 / screen_height as f64,
+                    ];
+                }
             }
             if input.scroll != prev_input.scroll {
                 let diff_x = input.scroll[0] - prev_input.scroll[0];
@@ -233,26 +248,43 @@ pub fn start_input_handler(
                     .scroll(diff_x as i32, enigo::Axis::Horizontal)
                     .unwrap();
                 enigo.scroll(diff_y as i32, enigo::Axis::Vertical).unwrap();
+                prev_input.scroll = input.scroll;
             }
-            prev_input = input;
         }
     });
     Ok(())
 }
 
-pub fn start(device: Arc<VulkanDevice>, connection: Connection) -> anyhow::Result<()> {
+pub fn start(weak: Weak<App>, device: Arc<VulkanDevice>, conn: Connection) -> anyhow::Result<()> {
     info!("Starting screen capture");
     let screen_capture = capture_screen()?;
     let screen_info = screen_capture.info;
+    let inner_conn = conn.inner().clone();
 
     info!("Starting stream");
-    start_stream(device, connection.unreliable_sender, screen_capture)?;
+    start_stream(device, conn.unreliable_sender, screen_capture)?;
 
     info!("Starting input handler");
     start_input_handler(
-        connection.unreliable_receiver,
+        conn.unreliable_receiver,
         screen_info.width,
         screen_info.height,
     )?;
+
+    info!("Starting ping updater");
+    // Deliberately not using tokio for this because the upgrade_in_event_loop
+    // call seems to block tokio until it is finished.
+    std::thread::spawn(move || {
+        loop {
+            let weak = weak.clone();
+            let inner_conn = inner_conn.clone();
+            weak.upgrade_in_event_loop(move |app| {
+                app.set_ping(inner_conn.rtt().as_millis() as _);
+            })
+            .unwrap();
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    });
+
     Ok(())
 }

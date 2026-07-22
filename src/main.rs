@@ -52,11 +52,12 @@ impl CustomApplicationHandler for ApplicationHandler {
         event: slint::winit_030::winit::event::DeviceEvent,
     ) -> slint::winit_030::EventResult {
         match event {
-            slint::winit_030::winit::event::DeviceEvent::MouseMotion { delta: (x, y) } => {
+            slint::winit_030::winit::event::DeviceEvent::MouseMotion { delta: (delta_x, delta_y) } => {
                 match self.0.get() {
                     Some(app) => {
-                        if app.get_view() == View::Watcher {
-                            app.invoke_mouse_move(x as f32, y as f32);
+                        if app.get_view() == View::Watcher && delta_x != 0.0 && delta_y != 0.0 {
+                            // only strings have sufficient precision in slint
+                            app.invoke_mouse_move(delta_x.to_string().into(), delta_y.to_string().into());
                         }
                     }
                     None => warn!("Received DeviceEvent::MouseMotion before App creation"),
@@ -124,7 +125,7 @@ async fn main() -> anyhow::Result<()> {
             info!("Connected");
             match role {
                 // TODO: show error message from start (if any) to user
-                Role::Streamer => streamer::start(device, conn),
+                Role::Streamer => streamer::start(weak, device, conn),
                 Role::Watcher => watcher::start(weak, device, conn),
             }
         });
@@ -154,7 +155,7 @@ async fn main() -> anyhow::Result<()> {
             };
             match role {
                 // TODO: show error message from start (if any) to user
-                Role::Streamer => streamer::start(device, connection)?,
+                Role::Streamer => streamer::start(weak, device, connection)?,
                 Role::Watcher => watcher::start(weak, device, connection)?,
             }
             Ok(role)

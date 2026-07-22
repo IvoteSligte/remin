@@ -11,7 +11,7 @@ pub struct Input {
     pub left_mouse_pressed: bool,
     pub middle_mouse_pressed: bool,
     pub right_mouse_pressed: bool,
-    pub scroll: [f64; 2],
+    pub scroll: [f64; 2], // FIXME
 }
 
 #[derive(SchemaWrite, SchemaRead)]
