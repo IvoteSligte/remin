@@ -18,7 +18,7 @@ use wgpu::{Device, Queue, TextureFormat, TextureUsages, TextureView, TextureView
 use super::create_texture;
 use super::wgpu_helpers::{WgpuConverterParameters, WgpuNv12ToRgbaConverter};
 
-use crate::App;
+use crate::{App, common::since};
 
 #[derive(Default, Clone)]
 pub struct Signal {
@@ -129,15 +129,12 @@ impl Decoder {
 
     pub fn decode(&mut self, data: &[u8]) -> Result<(), DecoderError> {
         trace!("Decoding H264 data");
-        let start_instant = Instant::now();
+        let decode_start = Instant::now();
         let nv12_frames = self.h264_to_nv12.decode(EncodedInputChunk {
             data,
             pts: None, // TODO: synchronisation timestamp
         })?;
-        trace!(
-            "H264-to-NV12 decoding took {:.2}ms",
-            (Instant::now() - start_instant).as_micros() as f32 / 1000.0
-        );
+        trace!("H264-to-NV12 decoding took {:.2}ms", since(decode_start));
         // As the encoder splits each frame into one or more packets,
         // one packet should never correspond to more than one frame
         debug_assert!(nv12_frames.len() <= 1);
@@ -160,12 +157,12 @@ impl Decoder {
         let command_buffer = command_encoder.finish();
         trace!(
             "Creating the NV12-to-RGBA command buffer took {:.2}ms",
-            (Instant::now() - command_encoder_start).as_micros() as f32 / 1000.0
+            since(command_encoder_start)
         );
         command_buffer.on_submitted_work_done(move || {
             trace!(
                 "NV12-to-RGBA decoding pipeline took {:.2}ms",
-                (Instant::now() - command_encoder_start).as_micros() as f32 / 1000.0
+                since(command_encoder_start)
             );
         });
         let submit_start = Instant::now();

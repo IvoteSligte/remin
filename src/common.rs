@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, time::Instant};
 
 use wincode::{SchemaRead, SchemaWrite};
 
@@ -24,4 +24,9 @@ pub enum Packet<'a> {
         height: u32,
         bytes: &'a [u8],
     },
+}
+
+/// Returns the time in milliseconds since `start`
+pub(crate) fn since(start: Instant) -> f32 {
+    (Instant::now() - start).as_micros() as f32 / 1000.0
 }

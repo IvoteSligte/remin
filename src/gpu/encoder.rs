@@ -1,15 +1,18 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use gpu_video::{
     VulkanDevice, VulkanEncoderError, WgpuTexturesEncoderH264,
     parameters::{ColorRange, ColorSpace, EncoderParametersH264, RateControl, VideoParameters},
 };
+use log::trace;
 use thiserror::Error;
 use wgpu::{
     BindGroup, CommandEncoderDescriptor, Device, Origin3d, Queue, TexelCopyBufferLayout,
     TexelCopyTextureInfo, Texture, TextureAspect, TextureFormat, TextureUsages, TextureView,
     TextureViewDescriptor,
 };
+
+use crate::common::since;
 
 use super::create_texture;
 use super::wgpu_helpers::{WgpuConverterParameters, WgpuRgbaToNv12Converter};
@@ -111,6 +114,7 @@ impl Encoder {
 
     // Encode BGRA frame to H.264
     pub fn encode(&mut self, bytes: &[u8]) -> Result<Vec<u8>, VulkanEncoderError> {
+        let encoder_start = Instant::now();
         self.queue.write_texture(
             TexelCopyTextureInfo {
                 texture: &self.input_texture,
@@ -137,6 +141,9 @@ impl Encoder {
             &self.nv12_uv_plane_view,
         );
         let command_buffer = command_encoder.finish();
+        command_buffer.on_submitted_work_done(move || {
+            trace!("RBGA-to-NV12 encoding took {:.2}ms", since(encoder_start));
+        });
         self.queue.submit(Some(command_buffer));
         let encoded = self.nv12_to_h264.encode(
             gpu_video::InputFrame {
