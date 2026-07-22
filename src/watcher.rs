@@ -110,7 +110,10 @@ pub fn start_input_handler(app: &App, conn: UnreliableSender) {
                 warn!("Failed to lock cursor to window (fallback): {err}");
             };
         };
-        window.set_cursor_visible(false);
+        if !std::env::var("SHOW_CURSOR").is_ok() {
+            window.set_cursor_visible(false);
+            info!("Made cursor invisible");
+        }
     }
 
     // Callbacks are executed sequentially on the main event loop thread,

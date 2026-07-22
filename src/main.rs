@@ -95,7 +95,7 @@ fn init_backend(app_placeholder: Rc<OnceLock<App>>) -> anyhow::Result<Arc<Vulkan
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::registry()
         .with(tracing_subscriber::filter::EnvFilter::from_default_env())
-        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::fmt::layer().without_time())
         .init();
 
     let app_slot = Rc::new(OnceLock::new());
