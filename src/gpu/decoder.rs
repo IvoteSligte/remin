@@ -9,6 +9,7 @@ use std::{
 use gpu_video::{
     EncodedInputChunk, VulkanDevice, WgpuTexturesDecoder as WgpuTexturesDecoderH264,
     parameters::{ColorRange, ColorSpace, DecoderParameters},
+    wgpu_helpers::{WgpuConverterParameters, WgpuNv12ToRgbaConverter},
 };
 use log::{info, trace, warn};
 use slint::{ComponentHandle, Weak};
@@ -16,7 +17,6 @@ use thiserror::Error;
 use wgpu::{Device, Queue, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor};
 
 use super::create_texture;
-use super::wgpu_helpers::{WgpuConverterParameters, WgpuNv12ToRgbaConverter};
 
 use crate::{App, common::since};
 
@@ -49,7 +49,7 @@ pub enum DecoderError {
     H264(#[from] gpu_video::DecoderError),
 
     #[error(transparent)]
-    ConverterInit(#[from] super::wgpu_helpers::WgpuConverterInitError),
+    ConverterInit(#[from] gpu_video::wgpu_helpers::WgpuConverterInitError),
 
     #[error("The provided data was not enough to produce a new frame")]
     NoNewFrame,

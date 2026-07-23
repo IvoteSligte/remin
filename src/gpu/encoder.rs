@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Instant};
 
 use gpu_video::{
     VulkanDevice, VulkanEncoderError, WgpuTexturesEncoderH264,
-    parameters::{ColorRange, ColorSpace, EncoderParametersH264, RateControl, VideoParameters},
+    parameters::{ColorRange, ColorSpace, EncoderParametersH264, RateControl, VideoParameters}, wgpu_helpers::{WgpuConverterParameters, WgpuRgbaToNv12Converter},
 };
 use log::trace;
 use thiserror::Error;
@@ -15,7 +15,6 @@ use wgpu::{
 use crate::common::since;
 
 use super::create_texture;
-use super::wgpu_helpers::{WgpuConverterParameters, WgpuRgbaToNv12Converter};
 
 #[derive(Error, Debug)]
 pub enum EncoderError {
@@ -23,7 +22,7 @@ pub enum EncoderError {
     Encode(#[from] gpu_video::VulkanEncoderError),
 
     #[error(transparent)]
-    ConverterInit(#[from] super::wgpu_helpers::WgpuConverterInitError),
+    ConverterInit(#[from] gpu_video::wgpu_helpers::WgpuConverterInitError),
 }
 
 pub struct Encoder {
@@ -87,7 +86,6 @@ impl Encoder {
                 color_space: ColorSpace::BT709,
                 color_range: ColorRange::Limited,
             },
-            format,
         )?;
         let nv12_to_h264 = device.create_wgpu_textures_encoder_h264(EncoderParametersH264 {
             input_parameters: VideoParameters {

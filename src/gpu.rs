@@ -4,7 +4,6 @@ use wgpu::{
 
 pub mod decoder;
 pub mod encoder;
-mod wgpu_helpers;
 
 pub use decoder::{Decoder, DecoderError};
 pub use encoder::Encoder;
