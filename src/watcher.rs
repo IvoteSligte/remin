@@ -2,11 +2,17 @@ use gpu_video::VulkanDevice;
 use log::{debug, info, trace, warn};
 use netnet::{Connection, UnreliableReceiver, UnreliableSender};
 use slint::{ComponentHandle, Weak, platform::PointerEventButton, winit_030::WinitWindowAccessor};
-use std::{cell::RefCell, ops::DerefMut, rc::Rc, sync::{Arc, mpsc}, time::Instant};
+use std::{
+    cell::RefCell,
+    ops::DerefMut,
+    rc::Rc,
+    sync::{Arc, mpsc},
+    time::Instant,
+};
 
 use crate::{
     App,
-    common::{Input, Packet, since},
+    common::{Input, Packet, TimeStamp, since},
     gpu,
 };
 
@@ -39,7 +45,11 @@ pub fn start_renderer(
                     width,
                     height,
                     bytes,
+                    // NOTE: timestamp is not accurate on remote devices as the internal clocks are not synchronized
+                    timestamp,
                 } => {
+                    let timestamp = TimeStamp::from_raw(timestamp);
+                    debug!("Received frame ({:.2}ms latency)", timestamp.since());
                     let decoder = decoder.get_or_insert_with(|| {
                         gpu::Decoder::new(
                             device.clone(),
@@ -51,32 +61,24 @@ pub fn start_renderer(
                         .unwrap()
                     });
                     let pre_decode = Instant::now();
-                    match decoder.decode(&bytes) {
-                        Ok(()) => {
-                            frames_per_second.tick();
-                            debug!("Rendering new frame ({:.2}/s)", frames_per_second.avg());
-                        }
-                        Err(gpu::DecoderError::NoNewFrame) => {
+                    if let Err(err) = decoder.decode(&bytes) {
+                        if matches!(err, gpu::DecoderError::NoNewFrame) {
                             debug!("Not enough frame data to construct a new frame");
                             continue;
                         }
                         // TODO: restart video stream if many sequential errors have been encountered
-                        Err(err) => {
-                            warn!("Failed to decode frame: {err}");
-                            continue;
-                        }
+                        warn!("Failed to decode frame: {err}");
+                        continue;
                     }
+                    frames_per_second.tick();
                     debug!(
-                        "Decoding frame took {:.2}ms",
-                        (Instant::now() - pre_decode).as_micros() as f32 / 1000.0,
+                        "Decoding frame took {:.2}ms ({:.2}ms latency, {:.2}/s, {:.2}ms since last)",
+                        since(pre_decode),
+                        timestamp.since(),
+                        frames_per_second.avg(),
+                        since(last_frame_instant)
                     );
-
-                    let now = Instant::now();
-                    debug!(
-                        "Received frame {:.2}ms after the last",
-                        (now - last_frame_instant).as_micros() as f32 / 1000.0
-                    );
-                    last_frame_instant = now;
+                    last_frame_instant = Instant::now();
                 }
             }
         }

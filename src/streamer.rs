@@ -10,7 +10,7 @@ use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 use tracing::warn;
 
-use crate::common::{Input, Packet};
+use crate::common::{Input, Packet, TimeStamp, since};
 use crate::{App, gpu};
 
 // TODO: UI element for adjusting these parameters
@@ -22,6 +22,7 @@ fn send_nal_units(
     mut bytes: &[u8],
     width: u32,
     height: u32,
+    timestamp: TimeStamp,
 ) -> anyhow::Result<()> {
     // max size - (sizeof(width) + sizeof(height) + sizeof(slice))
     let fragment_size = connection.max_fragment_size() - 20;
@@ -30,6 +31,7 @@ fn send_nal_units(
             width,
             height,
             bytes: unit_bytes,
+            timestamp: timestamp.raw(),
         })
         .unwrap();
         connection.send(&nal_unit)
@@ -52,12 +54,12 @@ fn send_nal_units(
 }
 
 pub struct ScreenCapture {
-    video: mpsc::Receiver<janck::Frame>,
+    video: mpsc::Receiver<(janck::Frame, TimeStamp)>,
     info: janck::FrameInfo,
 }
 
 pub fn capture_screen() -> anyhow::Result<ScreenCapture> {
-    let (frame_sender, frame_receiver) = mpsc::sync_channel::<janck::Frame>(0);
+    let (frame_sender, frame_receiver) = mpsc::sync_channel(0);
     let mut video = janck::capture_video(FRAME_RATE as _)?;
     let first_frame = video
         .next()
@@ -66,7 +68,7 @@ pub fn capture_screen() -> anyhow::Result<ScreenCapture> {
     std::thread::spawn(move || {
         // Using a separate thread allows a frame to be captured while another one is being processed
         for frame in video {
-            frame_sender.send(frame).unwrap();
+            frame_sender.send((frame, TimeStamp::now())).unwrap();
         }
     });
     Ok(ScreenCapture {
@@ -92,23 +94,20 @@ pub fn start_stream(
         let mut fps = Fps::default();
 
         // TODO: if janck can capture directly into [wgpu::Texture]s then the entire GPU upload step of encoding can be skipped
-        for janck::Frame { bytes, info, .. } in screen_capture.video {
+        for (janck::Frame { bytes, info, .. }, timestamp) in screen_capture.video {
             assert_eq!(info, screen_capture.info); // TODO: handle screen resizing and such
             // Encode frame to H.264
             let pre_encode = Instant::now();
-            let encoded = encoder.encode(&bytes).unwrap();
-            let now = Instant::now();
-            debug!(
-                "Encoding frame took {:.2}ms",
-                (now - pre_encode).as_micros() as f32 / 1000.0,
-            );
+            let encoded = encoder.encode(&bytes).unwrap().data;
+            debug!("Encoding frame took {:.2}ms", since(pre_encode));
             fps.tick();
             debug!(
-                "Sending {} byte frame ({width}x{height}, {:.2} fps)",
+                "Sending {} byte frame ({width}x{height}, {:.2}ms latency, {:.2} fps)",
                 encoded.len(),
+                timestamp.since(),
                 fps.avg()
             );
-            send_nal_units(&mut connection, &encoded, width, height).unwrap();
+            send_nal_units(&mut connection, &encoded, width, height, timestamp).unwrap();
         }
     });
     info!("Started screen cast");

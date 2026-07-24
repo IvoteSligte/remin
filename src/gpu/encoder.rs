@@ -1,8 +1,7 @@
 use std::{sync::Arc, time::Instant};
 
 use gpu_video::{
-    VulkanDevice, VulkanEncoderError, WgpuTexturesEncoderH264,
-    parameters::{ColorRange, ColorSpace, EncoderParametersH264, RateControl, VideoParameters}, wgpu_helpers::{WgpuConverterParameters, WgpuRgbaToNv12Converter},
+    EncodedOutputChunk, VulkanDevice, VulkanEncoderError, WgpuTexturesEncoderH264, parameters::{ColorRange, ColorSpace, EncoderParametersH264, RateControl, VideoParameters}, wgpu_helpers::{WgpuConverterParameters, WgpuRgbaToNv12Converter}
 };
 use log::trace;
 use thiserror::Error;
@@ -111,7 +110,7 @@ impl Encoder {
     }
 
     // Encode BGRA frame to H.264
-    pub fn encode(&mut self, bytes: &[u8]) -> Result<Vec<u8>, VulkanEncoderError> {
+    pub fn encode(&mut self, bytes: &[u8]) -> Result<EncodedOutputChunk<Vec<u8>>, VulkanEncoderError> {
         let encoder_start = Instant::now();
         self.queue.write_texture(
             TexelCopyTextureInfo {
@@ -150,6 +149,6 @@ impl Encoder {
             },
             false,
         )?;
-        Ok(encoded.data)
+        Ok(encoded)
     }
 }
