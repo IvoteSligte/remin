@@ -20,6 +20,7 @@ pub(crate) const FRAME_RATE: u32 = 60;
 fn send_nal_units(
     connection: &mut UnreliableSender,
     mut bytes: &[u8],
+    mut is_keyframe: bool,
     width: u32,
     height: u32,
     timestamp: TimeStamp,
@@ -31,9 +32,11 @@ fn send_nal_units(
             width,
             height,
             bytes: unit_bytes,
+            is_keyframe_start: is_keyframe,
             timestamp: timestamp.raw(),
         })
         .unwrap();
+        is_keyframe = false;
         connection.send(&nal_unit)
     };
     let mut i = 4;
@@ -98,16 +101,24 @@ pub fn start_stream(
             assert_eq!(info, screen_capture.info); // TODO: handle screen resizing and such
             // Encode frame to H.264
             let pre_encode = Instant::now();
-            let encoded = encoder.encode(&bytes).unwrap().data;
+            let encoded = encoder.encode(&bytes).unwrap();
             debug!("Encoding frame took {:.2}ms", since(pre_encode));
             fps.tick();
             debug!(
                 "Sending {} byte frame ({width}x{height}, {:.2}ms latency, {:.2} fps)",
-                encoded.len(),
+                encoded.data.len(),
                 timestamp.since(),
                 fps.avg()
             );
-            send_nal_units(&mut connection, &encoded, width, height, timestamp).unwrap();
+            send_nal_units(
+                &mut connection,
+                &encoded.data,
+                encoded.is_keyframe,
+                width,
+                height,
+                timestamp,
+            )
+            .unwrap();
         }
     });
     info!("Started screen cast");

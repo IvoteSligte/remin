@@ -24,6 +24,8 @@ pub enum Packet<'a> {
         width: u32,
         height: u32,
         bytes: &'a [u8],
+        /// True if this NAL unit is the first unit of a keyframe
+        is_keyframe_start: bool,
         /// Microseconds since UNIX epoch
         timestamp: i64,
     },

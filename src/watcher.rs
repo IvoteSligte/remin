@@ -1,12 +1,13 @@
 use gpu_video::VulkanDevice;
-use log::{debug, info, trace, warn};
+use log::{debug, error, info, trace, warn};
 use netnet::{Connection, UnreliableReceiver, UnreliableSender};
 use slint::{ComponentHandle, Weak, platform::PointerEventButton, winit_030::WinitWindowAccessor};
 use std::{
     cell::RefCell,
+    collections::VecDeque,
     ops::DerefMut,
     rc::Rc,
-    sync::{Arc, mpsc},
+    sync::{Arc, Mutex},
     time::Instant,
 };
 
@@ -22,65 +23,81 @@ pub fn start_renderer(
     mut conn: UnreliableReceiver,
 ) -> anyhow::Result<()> {
     info!("Started packet processing loop");
-    let (packet_sender, packet_receiver) = mpsc::sync_channel(100);
+    let frame_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(100)));
+    let frame_buffer2 = frame_buffer.clone();
 
     tokio::task::spawn(async move {
         loop {
-            let packet = conn.recv().await.unwrap();
-            packet_sender.send((packet, Instant::now())).unwrap();
-        }
-    });
-
-    let mut decoder = None;
-    std::thread::spawn(move || {
-        let mut frames_per_second = fps_ticker::Fps::default();
-        let mut last_frame_instant = Instant::now();
-
-        while let Ok((bytes, instant)) = packet_receiver.recv() {
-            trace!("Channel latency: {}ms", since(instant));
-            let packet: Packet = wincode::deserialize(&bytes).unwrap();
+            let packet_bytes = conn.recv().await.unwrap();
+            let packet: Packet = wincode::deserialize(&packet_bytes).unwrap();
             match packet {
                 Packet::Input { .. } => warn!("Watcher received an input packet"),
                 Packet::H264 {
                     width,
                     height,
                     bytes,
+                    is_keyframe_start,
                     // NOTE: timestamp is not accurate on remote devices as the internal clocks are not synchronized
                     timestamp,
                 } => {
-                    let timestamp = TimeStamp::from_raw(timestamp);
-                    debug!("Received frame ({:.2}ms latency)", timestamp.since());
-                    let decoder = decoder.get_or_insert_with(|| {
-                        gpu::Decoder::new(
-                            device.clone(),
-                            device.wgpu_queue(),
-                            weak.clone(),
-                            width,
-                            height,
-                        )
-                        .unwrap()
-                    });
-                    let pre_decode = Instant::now();
-                    if let Err(err) = decoder.decode(&bytes) {
-                        if matches!(err, gpu::DecoderError::NoNewFrame) {
-                            debug!("Not enough frame data to construct a new frame");
-                            continue;
-                        }
-                        // TODO: restart video stream if many sequential errors have been encountered
-                        warn!("Failed to decode frame: {err}");
-                        continue;
+                    let instant = Instant::now();
+                    let mut guard = frame_buffer.lock().unwrap();
+                    if is_keyframe_start {
+                        // Once a keyframe has arrived, processing older frames only adds unnecessary latency
+                        guard.clear();
                     }
-                    frames_per_second.tick();
-                    debug!(
-                        "Decoding frame took {:.2}ms ({:.2}ms latency, {:.2}/s, {:.2}ms since last)",
-                        since(pre_decode),
-                        timestamp.since(),
-                        frames_per_second.avg(),
-                        since(last_frame_instant)
-                    );
-                    last_frame_instant = Instant::now();
+                    guard.push_back((width, height, bytes.to_vec(), timestamp, instant));
                 }
+            };
+        }
+    });
+    let mut decoder = None;
+    std::thread::spawn(move || {
+        let mut frames_per_second = fps_ticker::Fps::default();
+        let mut last_frame_instant = Instant::now();
+
+        loop {
+            let (width, height, bytes, timestamp, instant) =
+                match frame_buffer2.lock().map(|mut guard| guard.pop_front()) {
+                    Ok(Some(frame)) => frame,
+                    Ok(None) => continue,
+                    Err(err) => {
+                        error!("Network frame receiver thread panicked: {err}");
+                        break;
+                    }
+                };
+            trace!("Channel latency: {}ms", since(instant));
+            let timestamp = TimeStamp::from_raw(timestamp);
+            debug!("Received frame ({:.2}ms latency)", timestamp.since());
+            let decoder = decoder.get_or_insert_with(|| {
+                gpu::Decoder::new(
+                    device.clone(),
+                    device.wgpu_queue(),
+                    weak.clone(),
+                    width,
+                    height,
+                )
+                .unwrap()
+            });
+            let pre_decode = Instant::now();
+            if let Err(err) = decoder.decode(&bytes) {
+                if matches!(err, gpu::DecoderError::NoNewFrame) {
+                    debug!("Not enough frame data to construct a new frame");
+                    continue;
+                }
+                // TODO: restart video stream if many sequential errors have been encountered
+                warn!("Failed to decode frame: {err}");
+                continue;
             }
+            frames_per_second.tick();
+            debug!(
+                "Decoding frame took {:.2}ms ({:.2}ms latency, {:.2}/s, {:.2}ms since last)",
+                since(pre_decode),
+                timestamp.since(),
+                frames_per_second.avg(),
+                since(last_frame_instant)
+            );
+            last_frame_instant = Instant::now();
         }
         info!("Thread receiver terminated");
     });
