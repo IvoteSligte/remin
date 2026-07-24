@@ -22,13 +22,13 @@ tokio = { version = "1.52.4", default-features = false, features = ["macros", "r
 async-compat = "0.2.5"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 tracing = { version = "0.1.44", features = ["log-always"] }
+gpu-video = "0.4.0"
+chrono = "0.4.45"
 
 # TODO: use git paths once janck and netnet are stable
 janck = { path = "./janck" }
 netnet = { path = "./netnet" }
-gpu-video = { version = "0.4.0", path = "./gpu-video" }
 fps_ticker = { path = "./fps_ticker" }
-chrono = "0.4.45"
 
 # always use release profile for janck
 # settings from https://doc.rust-lang.org/cargo/reference/profiles.html#release

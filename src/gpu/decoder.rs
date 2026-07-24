@@ -7,9 +7,8 @@ use std::{
 };
 
 use gpu_video::{
-    ColorRange, ColorSpace, DecoderParameters, EncodedInputChunk, VulkanDevice,
-    WgpuConverterParameters, WgpuNv12ToRgbaConverter,
-    WgpuTexturesDecoder as WgpuTexturesDecoderH264,
+    EncodedInputChunk, VulkanDevice, WgpuNv12ToRgbaConverter,
+    WgpuTexturesDecoder as WgpuTexturesDecoderH264, parameters::{ColorRange, ColorSpace, DecoderParameters, WgpuConverterParameters},
 };
 use log::{info, trace, warn};
 use slint::{ComponentHandle, Weak};

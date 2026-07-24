@@ -39,6 +39,7 @@ fn send_nal_units(
         is_keyframe = false;
         connection.send(&nal_unit)
     };
+    // TODO: also allow [0, 0, 1] as NAL unit start indicator
     let mut i = 4;
     while bytes.len() > fragment_size && (i + 4) <= bytes.len() {
         if &bytes[i..i + 4] == &[0, 0, 0, 1] {

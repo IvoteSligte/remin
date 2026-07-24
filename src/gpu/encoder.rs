@@ -1,9 +1,8 @@
 use std::{sync::Arc, time::Instant};
 
 use gpu_video::{
-    ColorRange, ColorSpace, EncodedOutputChunk, EncoderParametersH264, RateControl,
-    VideoParameters, VulkanDevice, VulkanEncoderError, WgpuConverterParameters,
-    WgpuRgbaToNv12Converter, WgpuTexturesEncoderH264,
+    EncodedOutputChunk, VulkanDevice, VulkanEncoderError, WgpuRgbaToNv12Converter,
+    WgpuTexturesEncoderH264, parameters::{ColorRange, ColorSpace, EncoderParametersH264, RateControl, VideoParameters, WgpuConverterParameters},
 };
 use log::trace;
 use thiserror::Error;

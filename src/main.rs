@@ -6,7 +6,7 @@ use std::{
 };
 
 use common::HOST_PORT;
-use gpu_video::{VulkanAdapterDescriptor, VulkanDevice, VulkanDeviceDescriptor, VulkanInstance};
+use gpu_video::{VulkanDevice, VulkanInstance, parameters::{VulkanAdapterDescriptor, VulkanDeviceDescriptor}};
 use log::{info, warn};
 use slint::{ComponentHandle, SharedString, winit_030::CustomApplicationHandler};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
