@@ -2,11 +2,11 @@ use gpu_video::VulkanDevice;
 use log::{debug, info, trace, warn};
 use netnet::{Connection, UnreliableReceiver, UnreliableSender};
 use slint::{ComponentHandle, Weak, platform::PointerEventButton, winit_030::WinitWindowAccessor};
-use std::{cell::RefCell, ops::DerefMut, rc::Rc, sync::Arc, time::Instant};
+use std::{cell::RefCell, ops::DerefMut, rc::Rc, sync::{Arc, mpsc}, time::Instant};
 
 use crate::{
     App,
-    common::{Input, Packet},
+    common::{Input, Packet, since},
     gpu,
 };
 
@@ -16,21 +16,22 @@ pub fn start_renderer(
     mut conn: UnreliableReceiver,
 ) -> anyhow::Result<()> {
     info!("Started packet processing loop");
-    let mut decoder = None;
-    let (packet_sender, mut packet_receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(100);
+    let (packet_sender, packet_receiver) = mpsc::sync_channel(100);
 
     tokio::task::spawn(async move {
         loop {
             let packet = conn.recv().await.unwrap();
-            packet_sender.send(packet).await.unwrap();
+            packet_sender.send((packet, Instant::now())).unwrap();
         }
     });
 
-    tokio::task::spawn(async move {
+    let mut decoder = None;
+    std::thread::spawn(move || {
         let mut frames_per_second = fps_ticker::Fps::default();
         let mut last_frame_instant = Instant::now();
 
-        while let Some(bytes) = packet_receiver.recv().await {
+        while let Ok((bytes, instant)) = packet_receiver.recv() {
+            trace!("Channel latency: {}ms", since(instant));
             let packet: Packet = wincode::deserialize(&bytes).unwrap();
             match packet {
                 Packet::Input { .. } => warn!("Watcher received an input packet"),
@@ -39,20 +40,18 @@ pub fn start_renderer(
                     height,
                     bytes,
                 } => {
+                    let decoder = decoder.get_or_insert_with(|| {
+                        gpu::Decoder::new(
+                            device.clone(),
+                            device.wgpu_queue(),
+                            weak.clone(),
+                            width,
+                            height,
+                        )
+                        .unwrap()
+                    });
                     let pre_decode = Instant::now();
-                    match decoder
-                        .get_or_insert_with(|| {
-                            gpu::Decoder::new(
-                                device.clone(),
-                                device.wgpu_queue(),
-                                weak.clone(),
-                                width,
-                                height,
-                            )
-                            .unwrap()
-                        })
-                        .decode(&bytes)
-                    {
+                    match decoder.decode(&bytes) {
                         Ok(()) => {
                             frames_per_second.tick();
                             debug!("Rendering new frame ({:.2}/s)", frames_per_second.avg());
@@ -81,6 +80,7 @@ pub fn start_renderer(
                 }
             }
         }
+        info!("Thread receiver terminated");
     });
     Ok(())
 }
