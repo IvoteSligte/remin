@@ -6,10 +6,7 @@ use std::{
 };
 
 use common::HOST_PORT;
-use gpu_video::{
-    VulkanDevice, VulkanInstance,
-    parameters::{VulkanAdapterDescriptor, VulkanDeviceDescriptor},
-};
+use gpu_video::{VulkanAdapterDescriptor, VulkanDevice, VulkanDeviceDescriptor, VulkanInstance};
 use log::{info, warn};
 use slint::{ComponentHandle, SharedString, winit_030::CustomApplicationHandler};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -52,12 +49,17 @@ impl CustomApplicationHandler for ApplicationHandler {
         event: slint::winit_030::winit::event::DeviceEvent,
     ) -> slint::winit_030::EventResult {
         match event {
-            slint::winit_030::winit::event::DeviceEvent::MouseMotion { delta: (delta_x, delta_y) } => {
+            slint::winit_030::winit::event::DeviceEvent::MouseMotion {
+                delta: (delta_x, delta_y),
+            } => {
                 match self.0.get() {
                     Some(app) => {
                         if app.get_view() == View::Watcher && delta_x != 0.0 && delta_y != 0.0 {
                             // only strings have sufficient precision in slint
-                            app.invoke_mouse_move(delta_x.to_string().into(), delta_y.to_string().into());
+                            app.invoke_mouse_move(
+                                delta_x.to_string().into(),
+                                delta_y.to_string().into(),
+                            );
                         }
                     }
                     None => warn!("Received DeviceEvent::MouseMotion before App creation"),
