@@ -5,17 +5,12 @@ use std::{
 
 use clap::{Parser, ValueEnum};
 use common::HOST_PORT;
-use gpu_video::{
-    VulkanDevice, VulkanInstance,
-    parameters::{VulkanAdapterDescriptor, VulkanDeviceDescriptor},
-};
 use log::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use winit::event::KeyEvent;
 
 mod common;
 mod event_loop;
-mod gpu;
 mod net;
 mod streamer;
 mod watcher;
@@ -45,8 +40,8 @@ enum Role {
 }
 
 fn run_host(
-    instance: Arc<VulkanInstance>,
-    device: Arc<VulkanDevice>,
+    instance: Arc<avec::Instance>,
+    device: Arc<avec::Device>,
     role: Role,
 ) -> anyhow::Result<impl Future<Output = anyhow::Result<()>>> {
     let device = device.clone();
@@ -65,8 +60,8 @@ fn run_host(
 }
 
 fn run_client(
-    instance: Arc<VulkanInstance>,
-    device: Arc<VulkanDevice>,
+    instance: Arc<avec::Instance>,
+    device: Arc<avec::Device>,
     host_ip: IpAddr,
 ) -> anyhow::Result<impl Future<Output = anyhow::Result<()>>> {
     let host_addr = SocketAddr::new(host_ip, HOST_PORT);
@@ -88,17 +83,6 @@ fn run_client(
         }
         Ok(())
     })
-}
-
-fn init_backend() -> anyhow::Result<(Arc<VulkanInstance>, Arc<VulkanDevice>)> {
-    // TODO: integrate Slint's preferred options for creating instance, adapter, device, and queue
-    info!("Creating Vulkan instance");
-    let instance = VulkanInstance::new()?;
-    info!("Creating Vulkan adapter");
-    let adapter = instance.create_adapter(&VulkanAdapterDescriptor::default())?;
-    info!("Creating Vulkan device");
-    let device = adapter.create_device(&VulkanDeviceDescriptor::default())?;
-    Ok((instance, device))
 }
 
 fn encode_key(event: KeyEvent) -> Option<char> {
@@ -141,7 +125,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     info!("Initializing backend");
-    let (instance, device) = init_backend()?;
+    let (instance, device) = avec::init()?;
 
     match args.host_ip {
         Some(host_ip) => {

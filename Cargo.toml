@@ -12,19 +12,18 @@ log = "0.4.33"
 wincode = { version = "0.5.5", features = ["derive"] }
 # wpgu version must be synchronised with slint unstable-wgpu-* feature and gpu-video's wgpu version
 wgpu = "29.0.0"
-thiserror = "2.0.18"
 tokio = { version = "1.52.4", default-features = false, features = ["macros", "rt", "rt-multi-thread"] }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 tracing = { version = "0.1.44", features = ["log-always"] }
-gpu-video = "0.4.0"
 chrono = "0.4.45"
+clap = { version = "4.6.4", features = ["derive"] }
+winit = "0.30.13"
 
 # TODO: use git paths once janck and netnet are stable
 janck = { path = "./janck" }
 netnet = { path = "./netnet" }
+avec = { version = "0.1.0", path = "avec" }
 fps_ticker = { path = "./fps_ticker" }
-winit = "0.30.13"
-clap = { version = "4.6.4", features = ["derive"] }
 
 # always use release profile for janck
 # settings from https://doc.rust-lang.org/cargo/reference/profiles.html#release

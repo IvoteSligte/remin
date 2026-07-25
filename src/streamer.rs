@@ -1,7 +1,6 @@
 use anyhow::Context;
 use enigo::{Enigo, Keyboard, Mouse};
 use fps_ticker::Fps;
-use gpu_video::VulkanDevice;
 use log::{debug, error, info, trace};
 use netnet::{Connection, UnreliableReceiver, UnreliableSender};
 use std::sync::{Arc, mpsc};
@@ -9,7 +8,7 @@ use std::time::{Duration, Instant};
 use tracing::warn;
 
 use crate::common::{Input, Packet, TimeStamp, since};
-use crate::{decode_key, gpu};
+use crate::decode_key;
 
 // TODO: UI element for adjusting these parameters
 // TODO: resolution downscaling and frame rate reduction according to the client's monitor
@@ -80,7 +79,7 @@ pub fn capture_screen() -> anyhow::Result<ScreenCapture> {
 }
 
 pub fn start_stream(
-    device: Arc<VulkanDevice>,
+    device: Arc<avec::Device>,
     mut connection: UnreliableSender,
     screen_capture: ScreenCapture,
 ) -> Result<(), janck::Error> {
@@ -91,8 +90,13 @@ pub fn start_stream(
             stride,
             format,
         } = screen_capture.info;
+        let format = match format {
+            janck::Format::Bgra8 => avec::Format::Bgra8,
+            janck::Format::Rgba8 => avec::Format::Rgba8,
+            _ => unimplemented!(),
+        };
         let mut encoder =
-            gpu::Encoder::new(&device, width, height, stride, format, FRAME_RATE).unwrap();
+            avec::Encoder::new(&device, width, height, stride, format, FRAME_RATE).unwrap();
         let mut fps = Fps::default();
 
         // TODO: if janck can capture directly into [wgpu::Texture]s then the entire GPU upload step of encoding can be skipped
@@ -241,7 +245,7 @@ pub fn start_input_handler(
 // FIXME: LocallyClosed error when connecting locally, after a few frames have been sent
 //     despite Quinn saying that the peer connection is not actually closed
 
-pub fn start(device: Arc<VulkanDevice>, conn: Connection) -> anyhow::Result<()> {
+pub fn start(device: Arc<avec::Device>, conn: Connection) -> anyhow::Result<()> {
     info!("Starting screen capture");
     let screen_capture = capture_screen()?;
     let screen_info = screen_capture.info;

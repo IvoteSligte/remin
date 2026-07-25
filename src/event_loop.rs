@@ -1,6 +1,5 @@
 use std::sync::{Arc, OnceLock};
 
-use gpu_video::{VulkanDevice, VulkanInstance};
 use log::{debug, error, info, warn};
 use winit::{
     application::ApplicationHandler,
@@ -14,7 +13,7 @@ use crate::{Role, common::Input, encode_key};
 
 struct App {
     instance: wgpu::Instance,
-    device: Arc<VulkanDevice>,
+    device: Arc<avec::Device>,
     window: Option<Arc<Window>>,
     out_window: Arc<OnceLock<Arc<Window>>>,
     surface: Option<wgpu::Surface<'static>>,
@@ -30,8 +29,8 @@ const SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 impl App {
     pub fn new(
-        instance: Arc<VulkanInstance>,
-        device: Arc<VulkanDevice>,
+        instance: Arc<avec::Instance>,
+        device: Arc<avec::Device>,
         out_window: Arc<OnceLock<Arc<Window>>>,
         video_texture_view: Arc<OnceLock<wgpu::TextureView>>,
         role: Role,
@@ -274,8 +273,8 @@ impl ApplicationHandler for App {
 
 /// Runs the event loop on a separate thread
 pub(crate) fn run_event_loop(
-    instance: Arc<VulkanInstance>,
-    device: Arc<VulkanDevice>,
+    instance: Arc<avec::Instance>,
+    device: Arc<avec::Device>,
     out_window: Arc<OnceLock<Arc<Window>>>,
     video_texture_view: Arc<OnceLock<wgpu::TextureView>>,
     role: Role,

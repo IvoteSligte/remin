@@ -1,4 +1,3 @@
-use gpu_video::{VulkanDevice, VulkanInstance};
 use log::{debug, error, info, trace, warn};
 use netnet::{Connection, UnreliableReceiver};
 use std::{
@@ -11,11 +10,11 @@ use winit::window::Window;
 use crate::{
     Role,
     common::{Packet, TimeStamp, since},
-    gpu, run_event_loop,
+    run_event_loop,
 };
 
 pub fn start_video_processor(
-    device: Arc<VulkanDevice>,
+    device: Arc<avec::Device>,
     mut conn: UnreliableReceiver,
     window: Arc<OnceLock<Arc<Window>>>,
     out_video_texture_view: Arc<OnceLock<wgpu::TextureView>>,
@@ -70,7 +69,7 @@ pub fn start_video_processor(
             debug!("Received frame ({:.2}ms latency)", timestamp.since());
             let decoder = decoder.get_or_insert_with(|| {
                 let decoder =
-                    gpu::Decoder::new(device.clone(), device.wgpu_queue(), width, height).unwrap();
+                    avec::Decoder::new(device.clone(), width, height).unwrap();
                 out_video_texture_view
                     .set(decoder.output_texture_view().clone())
                     .unwrap();
@@ -78,7 +77,7 @@ pub fn start_video_processor(
             });
             let pre_decode = Instant::now();
             if let Err(err) = decoder.decode(&bytes) {
-                if matches!(err, gpu::DecoderError::NoNewFrame) {
+                if matches!(err, avec::DecoderError::NoNewFrame) {
                     debug!("Not enough frame data to construct a new frame");
                     continue;
                 }
@@ -102,8 +101,8 @@ pub fn start_video_processor(
 }
 
 pub fn start(
-    instance: Arc<VulkanInstance>,
-    device: Arc<VulkanDevice>,
+    instance: Arc<avec::Instance>,
+    device: Arc<avec::Device>,
     mut conn: Connection,
 ) -> anyhow::Result<()> {
     let window = Arc::new(OnceLock::new());

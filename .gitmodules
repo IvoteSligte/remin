@@ -13,3 +13,6 @@
 [submodule "fps_ticker"]
 	path = fps_ticker
 	url = ./fps_ticker
+[submodule "avec"]
+	path = avec
+	url = ./avec
