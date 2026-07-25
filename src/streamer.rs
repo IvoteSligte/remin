@@ -2,7 +2,7 @@ use anyhow::Context;
 use enigo::{Enigo, Keyboard, Mouse};
 use fps_ticker::Fps;
 use gpu_video::VulkanDevice;
-use log::{debug, info, trace};
+use log::{debug, error, info, trace};
 use netnet::{Connection, UnreliableReceiver, UnreliableSender};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
@@ -119,6 +119,7 @@ pub fn start_stream(
             )
             .unwrap();
         }
+        error!("Screen capture video ended");
     });
     info!("Started screen cast");
     Ok(())
@@ -152,13 +153,13 @@ pub fn start_input_handler(
             };
             let just_released = prev_input.keys_pressed.difference(&input.keys_pressed);
             let just_pressed = input.keys_pressed.difference(&prev_input.keys_pressed);
-            for &slint_key in just_released {
-                let enigo_key = decode_key(slint_key);
+            for &key in just_released {
+                let enigo_key = decode_key(key);
                 debug!("Released key {:?}", enigo_key);
                 enigo.key(enigo_key, enigo::Direction::Release).unwrap();
             }
-            for &slint_key in just_pressed {
-                let enigo_key = decode_key(slint_key);
+            for &key in just_pressed {
+                let enigo_key = decode_key(key);
                 debug!("Pressed key {:?}", enigo_key);
                 enigo.key(enigo_key, enigo::Direction::Press).unwrap();
             }
@@ -237,11 +238,19 @@ pub fn start_input_handler(
     Ok(())
 }
 
+// FIXME: LocallyClosed error when connecting locally, after a few frames have been sent
+//     despite Quinn saying that the peer connection is not actually closed
+
 pub fn start(device: Arc<VulkanDevice>, conn: Connection) -> anyhow::Result<()> {
     info!("Starting screen capture");
     let screen_capture = capture_screen()?;
     let screen_info = screen_capture.info;
+
     let inner_conn = conn.inner().clone();
+    let inner_conn2 = conn.inner().clone();
+    tokio::task::spawn(async move {
+        error!("Connection closed: {}", inner_conn.closed().await);
+    });
 
     info!("Starting stream");
     start_stream(device, conn.unreliable_sender, screen_capture)?;
@@ -258,7 +267,7 @@ pub fn start(device: Arc<VulkanDevice>, conn: Connection) -> anyhow::Result<()> 
     // call seems to block tokio until it is finished.
     std::thread::spawn(move || {
         loop {
-            let inner_conn = inner_conn.clone();
+            let inner_conn = inner_conn2.clone();
             info!("Ping: {}ms", inner_conn.rtt().as_millis());
             std::thread::sleep(Duration::from_secs(1));
         }

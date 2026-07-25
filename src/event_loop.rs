@@ -26,6 +26,8 @@ struct App {
     on_input: Box<dyn FnMut(&Input)>,
 }
 
+const SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
 impl App {
     pub fn new(
         instance: Arc<VulkanInstance>,
@@ -36,10 +38,8 @@ impl App {
         on_input: impl FnMut(&Input) + 'static,
     ) -> Self {
         Self {
-            blitter: wgpu::util::TextureBlitter::new(
-                &device.wgpu_device(),
-                wgpu::TextureFormat::Bgra8Unorm,
-            ),
+            // TODO: bilinear or bicubic interpolation in the blit instead of nearest neighbor
+            blitter: wgpu::util::TextureBlitter::new(&device.wgpu_device(), SURFACE_FORMAT),
             instance: instance.wgpu_instance(),
             device,
             window: None,
@@ -56,10 +56,10 @@ impl App {
     fn configure_surface(&self) {
         let window = self.window.as_ref().unwrap();
         let surface_config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            // TODO: use Rgba8Unorm instead? not guaranteed, but commonly supported
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_DST,
             // TODO: should SRGB be used?
-            format: wgpu::TextureFormat::Bgra8Unorm,
+            // NOTE: only Bgra8Unorm[Srgb] are guaranteed
+            format: SURFACE_FORMAT,
             view_formats: vec![],
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             width: window.inner_size().width,
@@ -102,13 +102,9 @@ impl App {
                 return;
             }
         };
-        let surface_texture_view =
-            surface_texture
-                .texture
-                .create_view(&wgpu::TextureViewDescriptor {
-                    format: Some(wgpu::TextureFormat::Bgra8Unorm),
-                    ..Default::default()
-                });
+        let surface_texture_view = surface_texture
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
         let device = self.device.wgpu_device();
         let queue = self.device.wgpu_queue();
         let mut encoder = device.create_command_encoder(&Default::default());
@@ -121,6 +117,7 @@ impl App {
         );
         queue.submit([encoder.finish()]);
         self.window.as_ref().unwrap().pre_present_notify();
+        debug!("Presenting");
         surface_texture.present();
     }
 
@@ -192,7 +189,7 @@ impl ApplicationHandler for App {
             WindowEvent::CloseRequested | WindowEvent::Destroyed => {
                 self.on_exit();
                 event_loop.exit();
-            },
+            }
             WindowEvent::Focused(focused) => match focused {
                 true => self.on_focus(),
                 false => self.on_unfocus(),
@@ -296,4 +293,5 @@ pub(crate) fn run_event_loop(
         on_input,
     );
     event_loop.run_app(&mut app).unwrap();
+    warn!("Event loop finished");
 }

@@ -26,6 +26,7 @@ pub fn start_video_processor(
 
     tokio::task::spawn(async move {
         loop {
+            debug!("Waiting for frame from network");
             let packet_bytes = conn.recv().await.unwrap();
             let packet: Packet = wincode::deserialize(&packet_bytes).unwrap();
             match packet {
@@ -70,7 +71,9 @@ pub fn start_video_processor(
             let decoder = decoder.get_or_insert_with(|| {
                 let decoder =
                     gpu::Decoder::new(device.clone(), device.wgpu_queue(), width, height).unwrap();
-                out_video_texture_view.set(decoder.output_texture_view().clone()).unwrap();
+                out_video_texture_view
+                    .set(decoder.output_texture_view().clone())
+                    .unwrap();
                 decoder
             });
             let pre_decode = Instant::now();
@@ -105,6 +108,11 @@ pub fn start(
 ) -> anyhow::Result<()> {
     let window = Arc::new(OnceLock::new());
     let video_texture_view = Arc::new(OnceLock::new());
+
+    let inner_conn = conn.inner().clone();
+    tokio::task::spawn(async move {
+        error!("Connection closed: {}", inner_conn.closed().await);
+    });
 
     start_video_processor(
         device.clone(),
