@@ -1,77 +1,96 @@
 use std::{
-    io,
     net::{IpAddr, SocketAddr},
-    rc::Rc,
-    sync::{Arc, OnceLock},
+    sync::Arc,
 };
 
+use clap::{Parser, ValueEnum};
 use common::HOST_PORT;
-use gpu_video::{VulkanDevice, VulkanInstance, parameters::{VulkanAdapterDescriptor, VulkanDeviceDescriptor}};
+use gpu_video::{
+    VulkanDevice, VulkanInstance,
+    parameters::{VulkanAdapterDescriptor, VulkanDeviceDescriptor},
+};
 use log::{info, warn};
-use slint::{ComponentHandle, SharedString, winit_030::CustomApplicationHandler};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use winit::event::KeyEvent;
 
 mod common;
+mod event_loop;
 mod gpu;
 mod net;
 mod streamer;
 mod watcher;
 
-slint::include_modules!();
+pub(crate) use event_loop::run_event_loop;
 
-// NOTE: the wgpu Slint backend causes an error on program exit:
-// "cannot access a Thread Local Storage value during or after destruction: AccessError"
-// this may be fixed in a future wgpu/slint release, but it is not harmful for now
+// TODO: F11 for fullscreen, F12 for quit
 
-// TODO: F11 for fullscreen
+#[derive(Parser)]
+struct Args {
+    #[arg(long)]
+    host_ip: Option<IpAddr>,
+    #[arg(long)]    
+    role: Option<Role>,
+}
 
-fn parse_socket_address(text: &str, default_port: u16) -> io::Result<SocketAddr> {
-    text.parse::<SocketAddr>().or_else(|_| {
-        text.parse::<IpAddr>()
-            .map(|ip| SocketAddr::new(ip, default_port))
-            .map_err(|_| {
-                io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "invalid ip/socket address syntax",
-                )
-            })
+#[derive(Parser, ValueEnum, Clone, Copy)]
+enum Mode {
+    Host,
+    Client,
+}
+
+#[derive(Parser, ValueEnum, Clone, Copy, PartialEq, Eq)]
+enum Role {
+    Streamer,
+    Watcher,
+}
+
+fn run_host(
+    instance: Arc<VulkanInstance>,
+    device: Arc<VulkanDevice>,
+    role: Role,
+) -> anyhow::Result<impl Future<Output = anyhow::Result<()>>> {
+    let device = device.clone();
+    let future = net::host_server()?;
+    // FIXME: do not ignore errors
+    Ok(async move {
+        let (conn, mut control_stream) = future.await?;
+        control_stream.send_role(role).await?;
+        info!("Connected");
+        match role {
+            // TODO: show error message from start (if any) to user
+            Role::Streamer => streamer::start(device, conn),
+            Role::Watcher => watcher::start(instance, device, conn),
+        }
     })
 }
 
-/// *Must* be created in the same thread that creates the [App] itself.
-struct ApplicationHandler(Rc<OnceLock<App>>);
+fn run_client(
+    instance: Arc<VulkanInstance>,
+    device: Arc<VulkanDevice>,
+    host_ip: IpAddr,
+) -> anyhow::Result<impl Future<Output = anyhow::Result<()>>> {
+    let host_addr = SocketAddr::new(host_ip, HOST_PORT);
+    let future = net::connect_to_server(host_addr)?;
 
-impl CustomApplicationHandler for ApplicationHandler {
-    fn device_event(
-        &mut self,
-        _event_loop: &slint::winit_030::winit::event_loop::ActiveEventLoop,
-        _device_id: slint::winit_030::winit::event::DeviceId,
-        event: slint::winit_030::winit::event::DeviceEvent,
-    ) -> slint::winit_030::EventResult {
-        match event {
-            slint::winit_030::winit::event::DeviceEvent::MouseMotion {
-                delta: (delta_x, delta_y),
-            } => {
-                match self.0.get() {
-                    Some(app) => {
-                        if app.get_view() == View::Watcher && delta_x != 0.0 && delta_y != 0.0 {
-                            // only strings have sufficient precision in slint
-                            app.invoke_mouse_move(
-                                delta_x.to_string().into(),
-                                delta_y.to_string().into(),
-                            );
-                        }
-                    }
-                    None => warn!("Received DeviceEvent::MouseMotion before App creation"),
-                }
-            }
-            _ => (),
+    Ok(async move {
+        let (conn, mut control_stream) = future.await?;
+        info!("Connected; waiting for role");
+        let host_role = control_stream.recv_role().await?;
+        let role = match host_role {
+            Role::Streamer => Role::Watcher,
+            Role::Watcher => Role::Streamer,
+        };
+        info!("Running event loop");
+        match role {
+            // TODO: show error message from start (if any) to user
+            Role::Streamer => streamer::start(device, conn)?,
+            Role::Watcher => watcher::start(instance, device, conn)?,
         }
-        slint::winit_030::EventResult::Propagate
-    }
+        Ok(())
+    })
 }
 
-fn init_backend(app_placeholder: Rc<OnceLock<App>>) -> anyhow::Result<Arc<VulkanDevice>> {
+fn init_backend() -> anyhow::Result<(Arc<VulkanInstance>, Arc<VulkanDevice>)> {
     // TODO: integrate Slint's preferred options for creating instance, adapter, device, and queue
     info!("Creating Vulkan instance");
     let instance = VulkanInstance::new()?;
@@ -79,98 +98,59 @@ fn init_backend(app_placeholder: Rc<OnceLock<App>>) -> anyhow::Result<Arc<Vulkan
     let adapter = instance.create_adapter(&VulkanAdapterDescriptor::default())?;
     info!("Creating Vulkan device");
     let device = adapter.create_device(&VulkanDeviceDescriptor::default())?;
-    info!("Creating Slint backend from Vulkan objects");
-    slint::BackendSelector::new()
-        .backend_name("winit".to_string())
-        .require_wgpu_29(slint::wgpu_29::WGPUConfiguration::Manual {
-            instance: instance.wgpu_instance(),
-            adapter: device.wgpu_adapter(),
-            device: device.wgpu_device(),
-            queue: device.wgpu_queue(),
-        })
-        .with_winit_custom_application_handler(ApplicationHandler(app_placeholder))
-        .select()?;
-    Ok(device)
+    Ok((instance, device))
+}
+
+fn encode_key(event: KeyEvent) -> Option<char> {
+    match event.text {
+        Some(text) => {
+            return Some(text.chars().next().unwrap());
+        }
+        None => {
+            warn!("Key does not map to text: {:?}", event);
+            None
+        }
+    }
+}
+
+fn decode_key(key: char) -> enigo::Key {
+    match key {
+        k => enigo::Key::Unicode(k),
+    }
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
+
+    match (args.host_ip, args.role) {
+        (Some(_), None) | (None, Some(_)) => (),
+        _ => {
+            println!("Exactly one of --host-ip or --role must be specified.");
+            std::process::exit(1);
+        }
+    }
+
     tracing_subscriber::registry()
-        .with(tracing_subscriber::filter::EnvFilter::from_default_env())
+        .with(
+            tracing_subscriber::filter::EnvFilter::builder()
+                .with_default_directive(tracing::level_filters::LevelFilter::INFO.into())
+                .from_env_lossy(),
+        )
         .with(tracing_subscriber::fmt::layer().without_time())
         .init();
 
-    let app_slot = Rc::new(OnceLock::new());
-    let device = init_backend(app_slot.clone())?;
-    let device2 = device.clone();
+    info!("Initializing backend");
+    let (instance, device) = init_backend()?;
 
-    info!("Creating app");
-    let _ = app_slot.set(App::new()?);
-    let app = app_slot.get().unwrap();
-
-    let weak = app.as_weak();
-    let weak2 = app.as_weak();
-
-    app.on_is_socket_address(|text| parse_socket_address(&text, 0).is_ok());
-    // TODO: stop signals or stop awaiting
-    app.on_start_host(move |role| {
-        let device = device.clone();
-        let future = match net::host_server(weak.clone()) {
-            Ok(f) => f,
-            Err(err) => return err.to_string().into(),
-        };
-        let weak = weak.clone();
-        // FIXME: do not ignore errors
-        tokio::task::spawn(async move {
-            let (conn, mut control_stream) = future.await?;
-            control_stream.send_role(role).await?;
-            info!("Connected");
-            match role {
-                // TODO: show error message from start (if any) to user
-                Role::Streamer => streamer::start(weak, device, conn),
-                Role::Watcher => watcher::start(weak, device, conn),
-            }
-        });
-        "".into()
-    });
-    app.on_start_client(move |host_addr_str| {
-        fn wrap_err(err: impl ToString) -> (SharedString, Role) {
-            (err.to_string().into(), Role::Watcher) // role is ignored when err != ""
+    match args.host_ip {
+        Some(host_ip) => {
+            info!("Running client");
+            run_client(instance, device, host_ip)?.await
         }
-        let host_addr = match parse_socket_address(&host_addr_str, HOST_PORT) {
-            Ok(ok) => ok,
-            Err(err) => return wrap_err(err),
-        };
-        let device = device2.clone();
-        let future = match net::connect_to_server(weak2.clone(), host_addr) {
-            Ok(f) => f,
-            Err(err) => return wrap_err(err),
-        };
-        let weak = weak2.clone();
-        let result: anyhow::Result<Role> = tokio::runtime::Handle::current().block_on(async move {
-            let (connection, mut control_stream) = future.await?;
-            info!("Connected");
-            let host_role = control_stream.recv_role().await?;
-            let role = match host_role {
-                Role::Streamer => Role::Watcher,
-                Role::Watcher => Role::Streamer,
-            };
-            match role {
-                // TODO: show error message from start (if any) to user
-                Role::Streamer => streamer::start(weak, device, connection)?,
-                Role::Watcher => watcher::start(weak, device, connection)?,
-            }
-            Ok(role)
-        });
-        match result {
-            Ok(role) => ("".into(), role),
-            Err(err) => wrap_err(err),
+        None => {
+            info!("No host IP specified; hosting");
+            run_host(instance, device, args.role.unwrap())?.await
         }
-    });
-
-    info!("Running app");
-    tokio::task::block_in_place(|| {
-        app.run()?;
-        Ok(())
-    })
+    }
 }

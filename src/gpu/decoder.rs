@@ -1,46 +1,17 @@
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-    time::Instant,
-};
+use std::{sync::Arc, time::Instant};
 
 use gpu_video::{
     EncodedInputChunk, VulkanDevice, WgpuNv12ToRgbaConverter,
-    WgpuTexturesDecoder as WgpuTexturesDecoderH264, parameters::{ColorRange, ColorSpace, DecoderParameters, WgpuConverterParameters},
+    WgpuTexturesDecoder as WgpuTexturesDecoderH264,
+    parameters::{ColorRange, ColorSpace, DecoderParameters, WgpuConverterParameters},
 };
-use log::{info, trace, warn};
-use slint::{ComponentHandle, Weak};
+use log::{info, trace};
 use thiserror::Error;
 use wgpu::{Device, Queue, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor};
 
 use super::create_texture;
 
-use crate::{App, common::since};
-
-#[derive(Default, Clone)]
-pub struct Signal {
-    value: Arc<AtomicBool>,
-}
-
-impl Signal {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn set(&self) {
-        self.value.store(true, Ordering::Release);
-    }
-
-    pub fn clear(&self) {
-        self.value.store(false, Ordering::Release);
-    }
-
-    pub fn get(&self) -> bool {
-        self.value.load(Ordering::Acquire)
-    }
-}
+use crate::common::since;
 
 #[derive(Error, Debug)]
 pub enum DecoderError {
@@ -57,7 +28,7 @@ pub enum DecoderError {
 pub struct Decoder {
     h264_to_nv12: WgpuTexturesDecoderH264,
     nv12_to_rgba: WgpuNv12ToRgbaConverter,
-    rgba_texture_view: (TextureView, Signal),
+    rgba_texture_view: TextureView,
     device: Device,
     queue: Queue,
 }
@@ -67,7 +38,6 @@ impl Decoder {
     pub fn new(
         device: Arc<VulkanDevice>,
         queue: Queue,
-        weak_app: Weak<App>,
         width: u32,
         height: u32,
     ) -> Result<Self, DecoderError> {
@@ -90,40 +60,18 @@ impl Decoder {
             TextureFormat::Rgba8Unorm,
             TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT,
         );
-        let rgba_texture2 = rgba_texture.clone();
-        let in_use_signal = Signal::new();
-        let in_use_signal2 = in_use_signal.clone();
-        let weak_app2 = weak_app.clone();
-        weak_app
-            .upgrade_in_event_loop(move |app| {
-                app.set_video_frame(slint::Image::try_from(rgba_texture2).unwrap());
-                app.window()
-                    .set_rendering_notifier(move |state, _| match state {
-                        slint::RenderingState::BeforeRendering => {
-                            if let Some(app) = weak_app2.upgrade() {
-                                trace!("Redrawing window");
-                                in_use_signal2.set();
-                                // It is necessary to request a redraw because Slint is
-                                // not aware of us changing the video frame image
-                                app.window().request_redraw();
-                            }
-                        }
-                        slint::RenderingState::AfterRendering => {
-                            in_use_signal2.clear();
-                        }
-                        _ => (),
-                    })
-                    .unwrap();
-            })
-            .unwrap();
-        let view = rgba_texture.create_view(&TextureViewDescriptor::default());
+        let rgba_texture_view = rgba_texture.create_view(&TextureViewDescriptor::default());
         Ok(Self {
             h264_to_nv12,
             nv12_to_rgba,
             device: device.wgpu_device(),
-            rgba_texture_view: (view, in_use_signal),
+            rgba_texture_view,
             queue,
         })
+    }
+
+    pub fn output_texture_view(&self) -> &TextureView {
+        &self.rgba_texture_view
     }
 
     pub fn decode(&mut self, data: &[u8]) -> Result<(), DecoderError> {
@@ -146,13 +94,8 @@ impl Decoder {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         let bind_group = self.nv12_to_rgba.create_input_bind_group(&nv12_frame)?;
-        let (rgba_texture_view, in_use) = &self.rgba_texture_view;
-        if in_use.get() {
-            warn!("Texture already in use. Skipping decoding.");
-            return Ok(());
-        }
         self.nv12_to_rgba
-            .convert(&mut command_encoder, &bind_group, rgba_texture_view);
+            .convert(&mut command_encoder, &bind_group, &self.rgba_texture_view);
         let command_buffer = command_encoder.finish();
         trace!(
             "Creating the NV12-to-RGBA command buffer took {:.2}ms",
