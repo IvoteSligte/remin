@@ -246,10 +246,7 @@ pub fn start_input_handler(
 // FIXME: LocallyClosed error when connecting locally, after a few frames have been sent
 //     despite Quinn saying that the peer connection is not actually closed
 
-pub async fn start(
-    device: Arc<avec::Device>,
-    conn: Connection,
-) -> anyhow::Result<()> {
+pub async fn start(device: Arc<avec::Device>, conn: Connection) -> anyhow::Result<()> {
     info!("Starting screen capture");
     let screen_capture = capture_screen()?;
     let screen_info = screen_capture.info;
@@ -284,6 +281,6 @@ pub async fn start(
     tokio::select! {
         join_result = stream_handle => join_result?,
         join_result = input_handle => join_result?,
-        join_result = ping_handle => join_result?,        
+        join_result = ping_handle => join_result?,
     }
 }

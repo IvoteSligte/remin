@@ -20,7 +20,7 @@ mod watcher;
 struct Args {
     #[arg(long)]
     host_ip: Option<IpAddr>,
-    #[arg(long)]    
+    #[arg(long)]
     role: Option<Role>,
 }
 

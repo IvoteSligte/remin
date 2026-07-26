@@ -37,8 +37,10 @@ impl App {
         on_input: impl FnMut(&Input) + 'static,
     ) -> Self {
         Self {
-            // TODO: bilinear or bicubic interpolation in the blit instead of nearest neighbor
-            blitter: wgpu::util::TextureBlitter::new(&device.wgpu_device(), SURFACE_FORMAT),
+            // TODO: nicer downscaling? maybe with mipmaps? or otherwise a GUI backend such as FemtoVG
+            blitter: wgpu::util::TextureBlitterBuilder::new(&device.wgpu_device(), SURFACE_FORMAT)
+                .sample_type(wgpu::FilterMode::Linear)
+                .build(),
             instance: instance.wgpu_instance(),
             device,
             window: None,
@@ -76,7 +78,7 @@ impl App {
         let Some(video_texture_view) = self.video_texture_view.get() else {
             warn!("Trying to render, but the video texture view is not yet set");
             return;
-        };        
+        };
         debug!("Rendering");
         let surface_texture = match self.surface.as_ref().unwrap().get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(texture) => texture,

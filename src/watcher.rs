@@ -99,7 +99,9 @@ pub fn start_video_processor(
             match window.get() {
                 Some(weak) if let Some(window) = weak.upgrade() => window.request_redraw(),
                 Some(_) => {
-                    warn!("Cannot request redraw as the window has been destroyed; breaking rendering loop");
+                    warn!(
+                        "Cannot request redraw as the window has been destroyed; breaking rendering loop"
+                    );
                     break;
                 }
                 None => warn!("Cannot request redraw as the window is not yet created"),
