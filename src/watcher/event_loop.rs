@@ -1,4 +1,7 @@
-use std::sync::{Arc, OnceLock, Weak};
+use std::{
+    sync::{Arc, OnceLock, Weak},
+    time::Duration,
+};
 
 use log::{debug, error, info, warn};
 use winit::{
@@ -138,19 +141,25 @@ impl App {
     }
 
     fn on_focus(&self) {
-        let window = self.window.as_ref().unwrap();
+        // TODO: cursor grab on click or with delay on focus (and unfocus)
         if self.role == Role::Watcher {
-            info!("Trying to confine cursor to window");
-            if let Err(err) = window.set_cursor_grab(CursorGrabMode::Confined) {
-                warn!("Failed to confine cursor to window: {err}");
-                if let Err(err) = window.set_cursor_grab(CursorGrabMode::Locked) {
-                    warn!("Failed to lock cursor to window (fallback): {err}");
-                };
-            };
+            let window = self.window.clone().unwrap();
             if !std::env::var("SHOW_CURSOR").is_ok() {
                 window.set_cursor_visible(false);
                 info!("Made cursor invisible");
             }
+            // Wait a short while so that other cursor-based inputs can be performed,
+            // otherwise, on Windows, the top-bar buttons cannot be pressed.
+            tokio::task::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                info!("Trying to confine cursor to window");
+                if let Err(err) = window.set_cursor_grab(CursorGrabMode::Confined) {
+                    warn!("Failed to confine cursor to window: {err}");
+                    if let Err(err) = window.set_cursor_grab(CursorGrabMode::Locked) {
+                        warn!("Failed to lock cursor to window (fallback): {err}");
+                    };
+                };
+            });
         }
     }
 
@@ -192,6 +201,7 @@ impl ApplicationHandler for App {
         _window_id: WindowId,
         event: WindowEvent,
     ) {
+        // FIXME: fullscreen button on windows does not work
         match event {
             WindowEvent::CloseRequested | WindowEvent::Destroyed => {
                 self.on_exit();

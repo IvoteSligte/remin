@@ -80,6 +80,7 @@ fn run_client(
 }
 
 fn encode_key(event: KeyEvent) -> Option<char> {
+    // FIXME: release keys never map to text
     match event.text {
         Some(text) => {
             return Some(text.chars().next().unwrap());
@@ -97,8 +98,7 @@ fn decode_key(key: char) -> enigo::Key {
     }
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     match (args.host_ip, args.role) {
@@ -118,19 +118,23 @@ async fn main() -> anyhow::Result<()> {
         .with(tracing_subscriber::fmt::layer().without_time())
         .init();
 
-    info!("Initializing backend");
-    let (instance, device) = avec::init()?;
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(async move {
+            info!("Initializing backend");
+            let (instance, device) = avec::init()?;
 
-    let result = match args.host_ip {
-        Some(host_ip) => {
-            info!("Running client");
-            run_client(instance, device, host_ip)?.await
-        }
-        None => {
-            info!("No host IP specified; hosting");
-            run_host(instance, device, args.role.unwrap())?.await
-        }
-    };
-    info!("Program finished");
-    result
+            let result = match args.host_ip {
+                Some(host_ip) => {
+                    info!("Running client");
+                    run_client(instance, device, host_ip)?.await
+                }
+                None => {
+                    info!("No host IP specified; hosting");
+                    run_host(instance, device, args.role.unwrap())?.await
+                }
+            };
+            info!("Program finished");
+            result
+        })
 }
