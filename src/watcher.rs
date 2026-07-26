@@ -2,7 +2,7 @@ use log::{debug, error, info, trace, warn};
 use netnet::{Connection, UnreliableReceiver};
 use std::{
     collections::VecDeque,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock, Weak},
     time::Instant,
 };
 use winit::window::Window;
@@ -10,20 +10,25 @@ use winit::window::Window;
 use crate::{
     Role,
     common::{Packet, TimeStamp, since},
-    run_event_loop,
 };
+use event_loop::run_event_loop;
 
+mod event_loop;
+
+// This is deliberately not an `async` function, despite returning a [Future],
+// because `async` functions only start processing when `await`ed,
+// which is undesirable for this function as it spawns background tasks and then returns.
 pub fn start_video_processor(
     device: Arc<avec::Device>,
     mut conn: UnreliableReceiver,
-    window: Arc<OnceLock<Arc<Window>>>,
+    window: Arc<OnceLock<Weak<Window>>>,
     out_video_texture_view: Arc<OnceLock<wgpu::TextureView>>,
-) -> anyhow::Result<()> {
+) -> impl Future<Output = anyhow::Result<()>> {
     info!("Started packet processing loop");
     let frame_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(100)));
     let frame_buffer2 = frame_buffer.clone();
 
-    tokio::task::spawn(async move {
+    let network_handle = tokio::task::spawn(async move {
         loop {
             debug!("Waiting for frame from network");
             let packet_bytes = conn.recv().await.unwrap();
@@ -50,7 +55,7 @@ pub fn start_video_processor(
         }
     });
     let mut decoder = None;
-    std::thread::spawn(move || {
+    let processor_handle = tokio::task::spawn_blocking(move || {
         let mut frames_per_second = fps_ticker::Fps::default();
         let mut last_frame_instant = Instant::now();
 
@@ -68,8 +73,7 @@ pub fn start_video_processor(
             let timestamp = TimeStamp::from_raw(timestamp);
             debug!("Received frame ({:.2}ms latency)", timestamp.since());
             let decoder = decoder.get_or_insert_with(|| {
-                let decoder =
-                    avec::Decoder::new(device.clone(), width, height).unwrap();
+                let decoder = avec::Decoder::new(device.clone(), width, height).unwrap();
                 out_video_texture_view
                     .set(decoder.output_texture_view().clone())
                     .unwrap();
@@ -92,37 +96,52 @@ pub fn start_video_processor(
                 frames_per_second.avg(),
                 since(last_frame_instant)
             );
-            window.wait().request_redraw();
+            match window.get() {
+                Some(weak) if let Some(window) = weak.upgrade() => window.request_redraw(),
+                Some(_) => {
+                    warn!("Cannot request redraw as the window has been destroyed; breaking rendering loop");
+                    break;
+                }
+                None => warn!("Cannot request redraw as the window is not yet created"),
+            }
             last_frame_instant = Instant::now();
         }
-        info!("Thread receiver terminated");
+        Ok(())
     });
-    Ok(())
+    async move {
+        // TODO: use JoinSet or tokio::task::scope instead, returning it from the function
+        tokio::select! {
+            join_result = network_handle => join_result?,
+            join_result = processor_handle => join_result?,
+        }
+    }
 }
 
-pub fn start(
+/// This function *must* be called from the main thread
+pub async fn start(
     instance: Arc<avec::Instance>,
     device: Arc<avec::Device>,
     mut conn: Connection,
 ) -> anyhow::Result<()> {
-    let window = Arc::new(OnceLock::new());
+    let out_window = Arc::new(OnceLock::new());
     let video_texture_view = Arc::new(OnceLock::new());
 
     let inner_conn = conn.inner().clone();
-    tokio::task::spawn(async move {
+    let conn_closed_handle = tokio::task::spawn(async move {
         error!("Connection closed: {}", inner_conn.closed().await);
     });
 
-    start_video_processor(
+    let _video_result_future = start_video_processor(
         device.clone(),
         conn.unreliable_receiver,
-        window.clone(),
+        out_window.clone(),
         video_texture_view.clone(),
-    )?;
+    );
+    // This is a blocking call because the event loop *must* run on the main thread
     run_event_loop(
         instance,
         device,
-        window,
+        out_window,
         video_texture_view,
         Role::Watcher,
         move |input| {
@@ -131,5 +150,6 @@ pub fn start(
             conn.unreliable_sender.send(&bytes).unwrap();
         },
     );
+    conn_closed_handle.abort();
     Ok(())
 }

@@ -10,12 +10,9 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use winit::event::KeyEvent;
 
 mod common;
-mod event_loop;
 mod net;
 mod streamer;
 mod watcher;
-
-pub(crate) use event_loop::run_event_loop;
 
 // TODO: F11 for fullscreen, F12 for quit
 
@@ -46,15 +43,13 @@ fn run_host(
 ) -> anyhow::Result<impl Future<Output = anyhow::Result<()>>> {
     let device = device.clone();
     let future = net::host_server()?;
-    // FIXME: do not ignore errors
     Ok(async move {
         let (conn, mut control_stream) = future.await?;
         control_stream.send_role(role).await?;
         info!("Connected");
         match role {
-            // TODO: show error message from start (if any) to user
-            Role::Streamer => streamer::start(device, conn),
-            Role::Watcher => watcher::start(instance, device, conn),
+            Role::Streamer => streamer::start(device, conn).await,
+            Role::Watcher => watcher::start(instance, device, conn).await,
         }
     })
 }
@@ -78,10 +73,9 @@ fn run_client(
         info!("Running event loop");
         match role {
             // TODO: show error message from start (if any) to user
-            Role::Streamer => streamer::start(device, conn)?,
-            Role::Watcher => watcher::start(instance, device, conn)?,
+            Role::Streamer => streamer::start(device, conn).await,
+            Role::Watcher => watcher::start(instance, device, conn).await,
         }
-        Ok(())
     })
 }
 
@@ -127,7 +121,7 @@ async fn main() -> anyhow::Result<()> {
     info!("Initializing backend");
     let (instance, device) = avec::init()?;
 
-    match args.host_ip {
+    let result = match args.host_ip {
         Some(host_ip) => {
             info!("Running client");
             run_client(instance, device, host_ip)?.await
@@ -136,5 +130,7 @@ async fn main() -> anyhow::Result<()> {
             info!("No host IP specified; hosting");
             run_host(instance, device, args.role.unwrap())?.await
         }
-    }
+    };
+    info!("Program finished");
+    result
 }

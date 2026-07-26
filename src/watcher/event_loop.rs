@@ -1,4 +1,4 @@
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, Weak};
 
 use log::{debug, error, info, warn};
 use winit::{
@@ -15,7 +15,7 @@ struct App {
     instance: wgpu::Instance,
     device: Arc<avec::Device>,
     window: Option<Arc<Window>>,
-    out_window: Arc<OnceLock<Arc<Window>>>,
+    out_window: Arc<OnceLock<Weak<Window>>>,
     surface: Option<wgpu::Surface<'static>>,
     video_texture_view: Arc<OnceLock<wgpu::TextureView>>,
     blitter: wgpu::util::TextureBlitter,
@@ -31,7 +31,7 @@ impl App {
     pub fn new(
         instance: Arc<avec::Instance>,
         device: Arc<avec::Device>,
-        out_window: Arc<OnceLock<Arc<Window>>>,
+        out_window: Arc<OnceLock<Weak<Window>>>,
         video_texture_view: Arc<OnceLock<wgpu::TextureView>>,
         role: Role,
         on_input: impl FnMut(&Input) + 'static,
@@ -73,6 +73,10 @@ impl App {
     }
 
     fn render(&mut self) {
+        let Some(video_texture_view) = self.video_texture_view.get() else {
+            warn!("Trying to render, but the video texture view is not yet set");
+            return;
+        };        
         debug!("Rendering");
         let surface_texture = match self.surface.as_ref().unwrap().get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(texture) => texture,
@@ -104,14 +108,14 @@ impl App {
         let surface_texture_view = surface_texture
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
+        debug!("Copying texture to surface");
         let device = self.device.wgpu_device();
         let queue = self.device.wgpu_queue();
         let mut encoder = device.create_command_encoder(&Default::default());
         self.blitter.copy(
             &device,
             &mut encoder,
-            // NOTE: can this deadlock with out_window?
-            self.video_texture_view.wait(),
+            video_texture_view,
             &surface_texture_view,
         );
         queue.submit([encoder.finish()]);
@@ -158,9 +162,9 @@ impl App {
 
     fn on_exit(&mut self) {
         // Window may have been destroyed at this point
-        warn!("Exiting");
-        self.surface.take();
-        self.window.take();
+        warn!("Exiting; closing window");
+        self.surface.take(); // drop surface
+        self.window.take(); // drop window
     }
 }
 
@@ -173,9 +177,11 @@ impl ApplicationHandler for App {
                 .create_window(Window::default_attributes())
                 .unwrap(),
         );
-        self.out_window.set(window.clone()).unwrap();
+        self.out_window.set(Arc::downgrade(&window)).unwrap();
         self.window = Some(window.clone());
+        info!("Created window");
         self.surface = Some(self.instance.create_surface(window).unwrap());
+        info!("Created surface");
     }
 
     fn window_event(
@@ -271,11 +277,11 @@ impl ApplicationHandler for App {
     }
 }
 
-/// Runs the event loop on a separate thread
-pub(crate) fn run_event_loop(
+/// This function *must* be called from the main thread
+pub fn run_event_loop(
     instance: Arc<avec::Instance>,
     device: Arc<avec::Device>,
-    out_window: Arc<OnceLock<Arc<Window>>>,
+    out_window: Arc<OnceLock<Weak<Window>>>,
     video_texture_view: Arc<OnceLock<wgpu::TextureView>>,
     role: Role,
     on_input: impl FnMut(&Input) + Send + 'static,
