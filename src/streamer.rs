@@ -1,17 +1,15 @@
 use anyhow::Context;
 use enigo::{Enigo, Keyboard, Mouse};
 use fps_ticker::Fps;
-use gpu_video::VulkanDevice;
-use log::{debug, info, trace};
+use log::{debug, error, info, trace};
 use netnet::{Connection, UnreliableReceiver, UnreliableSender};
-use slint::Weak;
-use slint::platform::Key as SlintKey;
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
+use tokio::task::JoinHandle;
 use tracing::warn;
 
 use crate::common::{Input, Packet, TimeStamp, since};
-use crate::{App, gpu};
+use crate::decode_key;
 
 // TODO: UI element for adjusting these parameters
 // TODO: resolution downscaling and frame rate reduction according to the client's monitor
@@ -82,19 +80,24 @@ pub fn capture_screen() -> anyhow::Result<ScreenCapture> {
 }
 
 pub fn start_stream(
-    device: Arc<VulkanDevice>,
+    device: Arc<avec::Device>,
     mut connection: UnreliableSender,
     screen_capture: ScreenCapture,
-) -> Result<(), janck::Error> {
-    std::thread::spawn(move || {
+) -> JoinHandle<anyhow::Result<()>> {
+    let handle = tokio::task::spawn_blocking(move || {
         let janck::FrameInfo {
             width,
             height,
             stride,
             format,
         } = screen_capture.info;
+        let format = match format {
+            janck::Format::Bgra8 => avec::Format::Bgra8,
+            janck::Format::Rgba8 => avec::Format::Rgba8,
+            _ => unimplemented!(),
+        };
         let mut encoder =
-            gpu::Encoder::new(&device, width, height, stride, format, FRAME_RATE).unwrap();
+            avec::Encoder::new(&device, width, height, stride, format, FRAME_RATE).unwrap();
         let mut fps = Fps::default();
 
         // TODO: if janck can capture directly into [wgpu::Texture]s then the entire GPU upload step of encoding can be skipped
@@ -121,43 +124,17 @@ pub fn start_stream(
             )
             .unwrap();
         }
+        error!("Screen capture video ended");
+        Ok(())
     });
     info!("Started screen cast");
-    Ok(())
-}
-
-fn slint_key_to_enigo(slint: char) -> enigo::Key {
-    match slint {
-        c if c == char::from(SlintKey::Shift) => enigo::Key::LShift,
-        c if c == char::from(SlintKey::ShiftR) => enigo::Key::RShift,
-        c if c == char::from(SlintKey::Return) => enigo::Key::Return,
-        c if c == char::from(SlintKey::Control) => enigo::Key::LControl,
-        c if c == char::from(SlintKey::ControlR) => enigo::Key::RControl,
-        c if c == char::from(SlintKey::UpArrow) => enigo::Key::UpArrow,
-        c if c == char::from(SlintKey::DownArrow) => enigo::Key::DownArrow,
-        c if c == char::from(SlintKey::LeftArrow) => enigo::Key::LeftArrow,
-        c if c == char::from(SlintKey::RightArrow) => enigo::Key::RightArrow,
-        c if c == char::from(SlintKey::F1) => enigo::Key::F1,
-        c if c == char::from(SlintKey::F2) => enigo::Key::F2,
-        c if c == char::from(SlintKey::F3) => enigo::Key::F3,
-        c if c == char::from(SlintKey::F4) => enigo::Key::F4,
-        c if c == char::from(SlintKey::F5) => enigo::Key::F5,
-        c if c == char::from(SlintKey::F6) => enigo::Key::F6,
-        c if c == char::from(SlintKey::F7) => enigo::Key::F7,
-        c if c == char::from(SlintKey::F8) => enigo::Key::F8,
-        c if c == char::from(SlintKey::F9) => enigo::Key::F9,
-        c if c == char::from(SlintKey::F10) => enigo::Key::F10,
-        // F11 is not forwarded because it may be used as full-screen toggle in the future
-        // F12 is not forwarded because F12 exits to the Remin main menu
-        c => enigo::Key::Unicode(c),
-    }
+    handle
 }
 
 fn direction_from_pressed(pressed: bool) -> enigo::Direction {
-    if pressed {
-        enigo::Direction::Press
-    } else {
-        enigo::Direction::Release
+    match pressed {
+        true => enigo::Direction::Press,
+        false => enigo::Direction::Release,
     }
 }
 
@@ -165,12 +142,12 @@ pub fn start_input_handler(
     mut connection: UnreliableReceiver,
     screen_width: u32,
     screen_height: u32,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<JoinHandle<anyhow::Result<()>>> {
     info!("Starting input handler");
     let mut enigo = Enigo::new(&enigo::Settings::default())?;
     info!("Created virtual keyboard and mouse");
 
-    tokio::task::spawn(async move {
+    let handle = tokio::task::spawn(async move {
         let mut prev_input = Input::default();
 
         loop {
@@ -181,13 +158,13 @@ pub fn start_input_handler(
             };
             let just_released = prev_input.keys_pressed.difference(&input.keys_pressed);
             let just_pressed = input.keys_pressed.difference(&prev_input.keys_pressed);
-            for &slint_key in just_released {
-                let enigo_key = slint_key_to_enigo(slint_key);
+            for &key in just_released {
+                let enigo_key = decode_key(key);
                 debug!("Released key {:?}", enigo_key);
                 enigo.key(enigo_key, enigo::Direction::Release).unwrap();
             }
-            for &slint_key in just_pressed {
-                let enigo_key = slint_key_to_enigo(slint_key);
+            for &key in just_pressed {
+                let enigo_key = decode_key(key);
                 debug!("Pressed key {:?}", enigo_key);
                 enigo.key(enigo_key, enigo::Direction::Press).unwrap();
             }
@@ -223,8 +200,8 @@ pub fn start_input_handler(
                 prev_input.right_mouse_pressed = input.right_mouse_pressed;
             }
             if input.mouse_position != prev_input.mouse_position {
-                let [normalized_x, normalized_y] = input.mouse_position;
-                let [prev_normalized_x, prev_normalized_y] = prev_input.mouse_position;
+                let (normalized_x, normalized_y) = input.mouse_position;
+                let (prev_normalized_x, prev_normalized_y) = prev_input.mouse_position;
                 let diff_x = normalized_x - prev_normalized_x;
                 let diff_y = normalized_y - prev_normalized_y;
                 // enigo.main_display().size() can be used to get display dimensions on most devices,
@@ -245,15 +222,15 @@ pub fn start_input_handler(
                         offset_y as f64 / screen_height as f64
                     );
                     // The offset has been rounded, which prev_input = input would not account for.
-                    prev_input.mouse_position = [
+                    prev_input.mouse_position = (
                         prev_normalized_x + offset_x as f64 / screen_width as f64,
                         prev_normalized_y + offset_y as f64 / screen_height as f64,
-                    ];
+                    );
                 }
             }
             if input.scroll != prev_input.scroll {
-                let diff_x = input.scroll[0] - prev_input.scroll[0];
-                let diff_y = input.scroll[1] - prev_input.scroll[1];
+                let diff_x = input.scroll.0 - prev_input.scroll.0;
+                let diff_y = input.scroll.1 - prev_input.scroll.1;
                 debug!("Mouse scrolled by {:.0},{:.0}", diff_x, diff_y);
                 enigo
                     .scroll(diff_x as i32, enigo::Axis::Horizontal)
@@ -263,20 +240,28 @@ pub fn start_input_handler(
             }
         }
     });
-    Ok(())
+    Ok(handle)
 }
 
-pub fn start(weak: Weak<App>, device: Arc<VulkanDevice>, conn: Connection) -> anyhow::Result<()> {
+// FIXME: LocallyClosed error when connecting locally, after a few frames have been sent
+//     despite Quinn saying that the peer connection is not actually closed
+
+pub async fn start(device: Arc<avec::Device>, conn: Connection) -> anyhow::Result<()> {
     info!("Starting screen capture");
     let screen_capture = capture_screen()?;
     let screen_info = screen_capture.info;
+
     let inner_conn = conn.inner().clone();
+    let inner_conn2 = conn.inner().clone();
+    tokio::task::spawn(async move {
+        error!("Connection closed: {}", inner_conn.closed().await);
+    });
 
     info!("Starting stream");
-    start_stream(device, conn.unreliable_sender, screen_capture)?;
+    let stream_handle = start_stream(device, conn.unreliable_sender, screen_capture);
 
     info!("Starting input handler");
-    start_input_handler(
+    let input_handle = start_input_handler(
         conn.unreliable_receiver,
         screen_info.width,
         screen_info.height,
@@ -285,17 +270,17 @@ pub fn start(weak: Weak<App>, device: Arc<VulkanDevice>, conn: Connection) -> an
     info!("Starting ping updater");
     // Deliberately not using tokio for this because the upgrade_in_event_loop
     // call seems to block tokio until it is finished.
-    std::thread::spawn(move || {
+    let ping_handle = tokio::task::spawn(async move {
         loop {
-            let weak = weak.clone();
-            let inner_conn = inner_conn.clone();
-            weak.upgrade_in_event_loop(move |app| {
-                app.set_ping(inner_conn.rtt().as_millis() as _);
-            })
-            .unwrap();
-            std::thread::sleep(Duration::from_millis(200));
+            let inner_conn = inner_conn2.clone();
+            info!("Ping: {}ms", inner_conn.rtt().as_millis());
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     });
 
-    Ok(())
+    tokio::select! {
+        join_result = stream_handle => join_result?,
+        join_result = input_handle => join_result?,
+        join_result = ping_handle => join_result?,
+    }
 }

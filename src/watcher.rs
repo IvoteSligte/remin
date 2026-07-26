@@ -1,33 +1,36 @@
-use gpu_video::VulkanDevice;
 use log::{debug, error, info, trace, warn};
-use netnet::{Connection, UnreliableReceiver, UnreliableSender};
-use slint::{ComponentHandle, Weak, platform::PointerEventButton, winit_030::WinitWindowAccessor};
+use netnet::{Connection, UnreliableReceiver};
 use std::{
-    cell::RefCell,
     collections::VecDeque,
-    ops::DerefMut,
-    rc::Rc,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock, Weak},
     time::Instant,
 };
+use winit::window::Window;
 
 use crate::{
-    App,
-    common::{Input, Packet, TimeStamp, since},
-    gpu,
+    Role,
+    common::{Packet, TimeStamp, since},
 };
+use event_loop::run_event_loop;
 
-pub fn start_renderer(
-    weak: Weak<App>,
-    device: Arc<VulkanDevice>,
+mod event_loop;
+
+// This is deliberately not an `async` function, despite returning a [Future],
+// because `async` functions only start processing when `await`ed,
+// which is undesirable for this function as it spawns background tasks and then returns.
+pub fn start_video_processor(
+    device: Arc<avec::Device>,
     mut conn: UnreliableReceiver,
-) -> anyhow::Result<()> {
+    window: Arc<OnceLock<Weak<Window>>>,
+    out_video_texture_view: Arc<OnceLock<wgpu::TextureView>>,
+) -> impl Future<Output = anyhow::Result<()>> {
     info!("Started packet processing loop");
     let frame_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(100)));
     let frame_buffer2 = frame_buffer.clone();
 
-    tokio::task::spawn(async move {
+    let network_handle = tokio::task::spawn(async move {
         loop {
+            debug!("Waiting for frame from network");
             let packet_bytes = conn.recv().await.unwrap();
             let packet: Packet = wincode::deserialize(&packet_bytes).unwrap();
             match packet {
@@ -52,7 +55,7 @@ pub fn start_renderer(
         }
     });
     let mut decoder = None;
-    std::thread::spawn(move || {
+    let processor_handle = tokio::task::spawn_blocking(move || {
         let mut frames_per_second = fps_ticker::Fps::default();
         let mut last_frame_instant = Instant::now();
 
@@ -70,22 +73,18 @@ pub fn start_renderer(
             let timestamp = TimeStamp::from_raw(timestamp);
             debug!("Received frame ({:.2}ms latency)", timestamp.since());
             let decoder = decoder.get_or_insert_with(|| {
-                gpu::Decoder::new(
-                    device.clone(),
-                    device.wgpu_queue(),
-                    weak.clone(),
-                    width,
-                    height,
-                )
-                .unwrap()
+                let decoder = avec::Decoder::new(device.clone(), width, height).unwrap();
+                out_video_texture_view
+                    .set(decoder.output_texture_view().clone())
+                    .unwrap();
+                decoder
             });
             let pre_decode = Instant::now();
             if let Err(err) = decoder.decode(&bytes) {
-                if matches!(err, gpu::DecoderError::NoNewFrame) {
+                if matches!(err, avec::DecoderError::NoNewFrame) {
                     debug!("Not enough frame data to construct a new frame");
                     continue;
                 }
-                // TODO: restart video stream if many sequential errors have been encountered
                 warn!("Failed to decode frame: {err}");
                 continue;
             }
@@ -97,97 +96,62 @@ pub fn start_renderer(
                 frames_per_second.avg(),
                 since(last_frame_instant)
             );
+            match window.get() {
+                Some(weak) if let Some(window) = weak.upgrade() => window.request_redraw(),
+                Some(_) => {
+                    warn!(
+                        "Cannot request redraw as the window has been destroyed; breaking rendering loop"
+                    );
+                    break;
+                }
+                None => warn!("Cannot request redraw as the window is not yet created"),
+            }
             last_frame_instant = Instant::now();
         }
-        info!("Thread receiver terminated");
+        Ok(())
     });
-    Ok(())
-}
-
-fn update_input(state: &Rc<RefCell<(UnreliableSender, Input)>>, mut f: impl FnMut(&mut Input)) {
-    let mut state = state.borrow_mut();
-    let (conn, input) = state.deref_mut();
-    f(input);
-    let packet = Packet::Input(input.clone());
-    let bytes = wincode::serialize(&packet).unwrap();
-    conn.send(&bytes).unwrap();
-}
-
-// Note that running two instances of remin locally (one host, one client) causes a feedback loop.
-pub fn start_input_handler(app: &App, conn: UnreliableSender) {
-    info!("Acquiring winit window handle");
-    let window = tokio::runtime::Handle::current()
-        .block_on(app.window().winit_window())
-        .unwrap();
-    // TODO: unlock and unhide cursor on_escape
-    {
-        use slint::winit_030::winit::window::CursorGrabMode;
-        info!("Trying to confine cursor to window");
-        if let Err(err) = window.set_cursor_grab(CursorGrabMode::Confined) {
-            warn!("Failed to confine cursor to window: {err}");
-            if let Err(err) = window.set_cursor_grab(CursorGrabMode::Locked) {
-                warn!("Failed to lock cursor to window (fallback): {err}");
-            };
-        };
-        if !std::env::var("SHOW_CURSOR").is_ok() {
-            window.set_cursor_visible(false);
-            info!("Made cursor invisible");
+    async move {
+        // TODO: use JoinSet or tokio::task::scope instead, returning it from the function
+        tokio::select! {
+            join_result = network_handle => join_result?,
+            join_result = processor_handle => join_result?,
         }
     }
-
-    // Callbacks are executed sequentially on the main event loop thread,
-    // so an Arc+Mutex is not necessary
-    let state = Rc::new(RefCell::new((conn, Input::default())));
-    let state2 = state.clone();
-    let state3 = state.clone();
-    let state4 = state.clone();
-
-    app.on_keyboard_input(move |text, action| {
-        // `text` is a string because slint does not work with characters
-        let Some(char) = text.chars().next() else {
-            return;
-        };
-        debug!("Key {:?}: '{}' = {}", action, char, char as u32);
-        update_input(&state, |input| {
-            match action {
-                crate::KeyAction::Press => input.keys_pressed.insert(char),
-                crate::KeyAction::Release => input.keys_pressed.remove(&char),
-            };
-        });
-    });
-    app.on_mouse_input(move |button, action| {
-        let pressed = action == crate::KeyAction::Press;
-        update_input(&state2, |input| match button {
-            PointerEventButton::Left => input.left_mouse_pressed = pressed,
-            PointerEventButton::Right => input.right_mouse_pressed = pressed,
-            PointerEventButton::Middle => input.middle_mouse_pressed = pressed,
-            _ => (),
-        });
-    });
-    let weak = app.as_weak();
-    app.on_mouse_move(move |delta_x, delta_y| {
-        let window_size = weak.upgrade().unwrap().window().size();
-        let delta_x = str::parse::<f64>(&delta_x).unwrap() / window_size.width as f64;
-        let delta_y = str::parse::<f64>(&delta_y).unwrap() / window_size.height as f64;
-        update_input(&state3, |input| {
-            input.mouse_position[0] += delta_x;
-            input.mouse_position[1] += delta_y;
-        });
-        trace!("Moving remote mouse by {delta_x:.4},{delta_y:.4}");
-    });
-    app.on_scroll_input(move |delta_x, delta_y| {
-        update_input(&state4, |input| {
-            input.scroll[0] += delta_x as f64;
-            input.scroll[1] += delta_y as f64;
-        });
-    });
-    info!("Registered input handler");
 }
 
-pub fn start(weak: Weak<App>, device: Arc<VulkanDevice>, conn: Connection) -> anyhow::Result<()> {
-    start_renderer(weak.clone(), device, conn.unreliable_receiver)?;
-    weak.upgrade_in_event_loop(move |app| {
-        start_input_handler(&app, conn.unreliable_sender);
-    })?;
+/// This function *must* be called from the main thread
+pub async fn start(
+    instance: Arc<avec::Instance>,
+    device: Arc<avec::Device>,
+    mut conn: Connection,
+) -> anyhow::Result<()> {
+    let out_window = Arc::new(OnceLock::new());
+    let video_texture_view = Arc::new(OnceLock::new());
+
+    let inner_conn = conn.inner().clone();
+    let conn_closed_handle = tokio::task::spawn(async move {
+        error!("Connection closed: {}", inner_conn.closed().await);
+    });
+
+    let _video_result_future = start_video_processor(
+        device.clone(),
+        conn.unreliable_receiver,
+        out_window.clone(),
+        video_texture_view.clone(),
+    );
+    // This is a blocking call because the event loop *must* run on the main thread
+    run_event_loop(
+        instance,
+        device,
+        out_window,
+        video_texture_view,
+        Role::Watcher,
+        move |input| {
+            let packet = Packet::Input(input.clone());
+            let bytes = wincode::serialize(&packet).unwrap();
+            conn.unreliable_sender.send(&bytes).unwrap();
+        },
+    );
+    conn_closed_handle.abort();
     Ok(())
 }
