@@ -5,11 +5,11 @@ use std::{
 
 use clap::{Parser, ValueEnum};
 use common::HOST_PORT;
-use log::{info, warn};
+use log::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use winit::event::KeyEvent;
 
 mod common;
+mod key;
 mod net;
 mod streamer;
 mod watcher;
@@ -77,25 +77,6 @@ fn run_client(
             Role::Watcher => watcher::start(instance, device, conn).await,
         }
     })
-}
-
-fn encode_key(event: KeyEvent) -> Option<char> {
-    // FIXME: release keys never map to text
-    match event.text {
-        Some(text) => {
-            return Some(text.chars().next().unwrap());
-        }
-        None => {
-            warn!("Key does not map to text: {:?}", event);
-            None
-        }
-    }
-}
-
-fn decode_key(key: char) -> enigo::Key {
-    match key {
-        k => enigo::Key::Unicode(k),
-    }
 }
 
 fn main() -> anyhow::Result<()> {

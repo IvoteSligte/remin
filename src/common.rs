@@ -3,16 +3,18 @@ use std::{collections::HashSet, time::Instant};
 use chrono::{DateTime, Utc};
 use wincode::{SchemaRead, SchemaWrite};
 
+use crate::key::Key;
+
 pub const HOST_PORT: u16 = 8084;
 
 #[derive(Debug, Default, Clone, SchemaWrite, SchemaRead)]
 pub struct Input {
-    pub keys_pressed: HashSet<char>,
+    pub keys_pressed: HashSet<Key>,
     pub mouse_position: (f64, f64),
     pub left_mouse_pressed: bool,
     pub middle_mouse_pressed: bool,
     pub right_mouse_pressed: bool,
-    pub scroll: (f64, f64), // FIXME
+    pub scroll: (f64, f64), // FIXME: calibrate
 }
 
 #[derive(SchemaWrite, SchemaRead)]

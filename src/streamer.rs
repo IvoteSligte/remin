@@ -9,7 +9,6 @@ use tokio::task::JoinHandle;
 use tracing::warn;
 
 use crate::common::{Input, Packet, TimeStamp, since};
-use crate::decode_key;
 
 // TODO: UI element for adjusting these parameters
 // TODO: resolution downscaling and frame rate reduction according to the client's monitor
@@ -159,12 +158,12 @@ pub fn start_input_handler(
             let just_released = prev_input.keys_pressed.difference(&input.keys_pressed);
             let just_pressed = input.keys_pressed.difference(&prev_input.keys_pressed);
             for &key in just_released {
-                let enigo_key = decode_key(key);
+                let enigo_key = key.into();
                 debug!("Released key {:?}", enigo_key);
                 enigo.key(enigo_key, enigo::Direction::Release).unwrap();
             }
             for &key in just_pressed {
-                let enigo_key = decode_key(key);
+                let enigo_key = key.into();
                 debug!("Pressed key {:?}", enigo_key);
                 enigo.key(enigo_key, enigo::Direction::Press).unwrap();
             }
@@ -242,9 +241,6 @@ pub fn start_input_handler(
     });
     Ok(handle)
 }
-
-// FIXME: LocallyClosed error when connecting locally, after a few frames have been sent
-//     despite Quinn saying that the peer connection is not actually closed
 
 pub async fn start(device: Arc<avec::Device>, conn: Connection) -> anyhow::Result<()> {
     info!("Starting screen capture");

@@ -8,11 +8,11 @@ use winit::{
     application::ApplicationHandler,
     event::{DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop},
-    keyboard::ModifiersKeyState,
+    keyboard::{ModifiersKeyState, PhysicalKey},
     window::{CursorGrabMode, Window, WindowId},
 };
 
-use crate::{Role, common::Input, encode_key};
+use crate::{Role, common::Input, key::Key};
 
 struct App {
     instance: wgpu::Instance,
@@ -141,7 +141,6 @@ impl App {
     }
 
     fn on_focus(&self) {
-        // TODO: cursor grab on click or with delay on focus (and unfocus)
         if self.role == Role::Watcher {
             let window = self.window.clone().unwrap();
             if !std::env::var("SHOW_CURSOR").is_ok() {
@@ -201,7 +200,6 @@ impl ApplicationHandler for App {
         _window_id: WindowId,
         event: WindowEvent,
     ) {
-        // FIXME: fullscreen button on windows does not work
         match event {
             WindowEvent::CloseRequested | WindowEvent::Destroyed => {
                 self.on_exit();
@@ -215,7 +213,12 @@ impl ApplicationHandler for App {
                 if event.repeat {
                     return;
                 }
-                let Some(key) = encode_key(event.clone()) else {
+                let PhysicalKey::Code(key_code) = event.physical_key else {
+                    warn!("Unidentified key: {:?}", event.physical_key);
+                    return;
+                };
+                let Ok(key) = Key::try_from(key_code) else {
+                    warn!("Unknown key: {:?}", key_code);
                     return;
                 };
                 match event.state {
