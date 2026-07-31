@@ -44,12 +44,12 @@ fn run_host(
     let device = device.clone();
     let future = net::host_server()?;
     Ok(async move {
-        let (conn, mut control_stream) = future.await?;
-        control_stream.send_role(role).await?;
+        let (conn, mut streams) = future.await?;
+        streams.send_role(role).await?;
         info!("Connected");
         match role {
-            Role::Streamer => streamer::start(device, conn).await,
-            Role::Watcher => watcher::start(instance, device, conn).await,
+            Role::Streamer => streamer::start(device, conn, streams).await,
+            Role::Watcher => watcher::start(instance, device, conn, streams).await,
         }
     })
 }
@@ -63,9 +63,9 @@ fn run_client(
     let future = net::connect_to_server(host_addr)?;
 
     Ok(async move {
-        let (conn, mut control_stream) = future.await?;
+        let (conn, mut streams) = future.await?;
         info!("Connected; waiting for role");
-        let host_role = control_stream.recv_role().await?;
+        let host_role = streams.recv_role().await?;
         let role = match host_role {
             Role::Streamer => Role::Watcher,
             Role::Watcher => Role::Streamer,
@@ -73,8 +73,8 @@ fn run_client(
         info!("Running event loop");
         match role {
             // TODO: show error message from start (if any) to user
-            Role::Streamer => streamer::start(device, conn).await,
-            Role::Watcher => watcher::start(instance, device, conn).await,
+            Role::Streamer => streamer::start(device, conn, streams).await,
+            Role::Watcher => watcher::start(instance, device, conn, streams).await,
         }
     })
 }

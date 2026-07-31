@@ -9,6 +9,7 @@ use tokio::task::JoinHandle;
 use tracing::warn;
 
 use crate::common::{Input, Packet, TimeStamp, since};
+use crate::net::Streams;
 
 // TODO: UI element for adjusting these parameters
 // TODO: resolution downscaling and frame rate reduction according to the client's monitor
@@ -242,7 +243,7 @@ pub fn start_input_handler(
     Ok(handle)
 }
 
-pub async fn start(device: Arc<avec::Device>, conn: Connection) -> anyhow::Result<()> {
+pub async fn start(device: Arc<avec::Device>, conn: Connection, streams: Streams) -> anyhow::Result<()> {
     info!("Starting screen capture");
     let screen_capture = capture_screen()?;
     let screen_info = screen_capture.info;
@@ -254,11 +255,11 @@ pub async fn start(device: Arc<avec::Device>, conn: Connection) -> anyhow::Resul
     });
 
     info!("Starting stream");
-    let stream_handle = start_stream(device, conn.unreliable_sender, screen_capture);
+    let stream_handle = start_stream(device, streams.video.sender, screen_capture);
 
     info!("Starting input handler");
     let input_handle = start_input_handler(
-        conn.unreliable_receiver,
+        streams.input.receiver,
         screen_info.width,
         screen_info.height,
     )?;

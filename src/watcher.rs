@@ -10,6 +10,7 @@ use winit::window::Window;
 use crate::{
     Role,
     common::{Packet, TimeStamp, since},
+    net::Streams,
 };
 use event_loop::run_event_loop;
 
@@ -123,7 +124,8 @@ pub fn start_video_processor(
 pub async fn start(
     instance: Arc<avec::Instance>,
     device: Arc<avec::Device>,
-    mut conn: Connection,
+    conn: Connection,
+    mut streams: Streams,
 ) -> anyhow::Result<()> {
     let out_window = Arc::new(OnceLock::new());
     let video_texture_view = Arc::new(OnceLock::new());
@@ -135,7 +137,7 @@ pub async fn start(
 
     let _video_result_future = start_video_processor(
         device.clone(),
-        conn.unreliable_receiver,
+        streams.video.receiver,
         out_window.clone(),
         video_texture_view.clone(),
     );
@@ -149,7 +151,7 @@ pub async fn start(
         move |input| {
             let packet = Packet::Input(input.clone());
             let bytes = wincode::serialize(&packet).unwrap();
-            conn.unreliable_sender.send(&bytes).unwrap();
+            streams.input.sender.send(&bytes).unwrap();
         },
     );
     conn_closed_handle.abort();
