@@ -17,20 +17,16 @@ pub struct Input {
     pub scroll: (f64, f64), // FIXME: calibrate
 }
 
+/// H.264 NAL unit (part of frame)
 #[derive(SchemaWrite, SchemaRead)]
-pub enum Packet<'a> {
-    /// Input state
-    Input(Input),
-    /// H.264 video fragment
-    H264 {
-        width: u32,
-        height: u32,
-        bytes: &'a [u8],
-        /// True if this NAL unit is the first unit of a keyframe
-        is_keyframe_start: bool,
-        /// Microseconds since UNIX epoch
-        timestamp: i64,
-    },
+pub struct H264<'a> {
+    pub width: u32,
+    pub height: u32,
+    pub bytes: &'a [u8],
+    /// True if this NAL unit is the first unit of a keyframe
+    pub is_keyframe_start: bool,
+    /// Microseconds since UNIX epoch
+    pub timestamp: i64,
 }
 
 /// Returns the time in milliseconds since `start`

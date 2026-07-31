@@ -6,9 +6,8 @@ use netnet::{Connection, UnreliableReceiver, UnreliableSender};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 use tokio::task::JoinHandle;
-use tracing::warn;
 
-use crate::common::{Input, Packet, TimeStamp, since};
+use crate::common::{H264, Input, TimeStamp, since};
 use crate::net::Streams;
 
 // TODO: UI element for adjusting these parameters
@@ -26,7 +25,7 @@ fn send_nal_units(
     // max size - (sizeof(width) + sizeof(height) + sizeof(slice))
     let fragment_size = connection.max_fragment_size() - 20;
     let mut send = |unit_bytes: &[u8]| {
-        let nal_unit = wincode::serialize(&Packet::H264 {
+        let nal_unit = wincode::serialize(&H264 {
             width,
             height,
             bytes: unit_bytes,
@@ -152,10 +151,7 @@ pub fn start_input_handler(
 
         loop {
             let bytes = connection.recv().await.unwrap();
-            let Packet::Input(input) = wincode::deserialize(&bytes).unwrap() else {
-                warn!("Streamer received unreliable non-input packet");
-                continue;
-            };
+            let input: Input = wincode::deserialize(&bytes).unwrap();
             let just_released = prev_input.keys_pressed.difference(&input.keys_pressed);
             let just_pressed = input.keys_pressed.difference(&prev_input.keys_pressed);
             for &key in just_released {
@@ -243,7 +239,11 @@ pub fn start_input_handler(
     Ok(handle)
 }
 
-pub async fn start(device: Arc<avec::Device>, conn: Connection, streams: Streams) -> anyhow::Result<()> {
+pub async fn start(
+    device: Arc<avec::Device>,
+    conn: Connection,
+    streams: Streams,
+) -> anyhow::Result<()> {
     info!("Starting screen capture");
     let screen_capture = capture_screen()?;
     let screen_info = screen_capture.info;

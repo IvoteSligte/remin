@@ -9,7 +9,7 @@ use winit::window::Window;
 
 use crate::{
     Role,
-    common::{Packet, TimeStamp, since},
+    common::{H264, TimeStamp, since},
     net::Streams,
 };
 use event_loop::run_event_loop;
@@ -33,26 +33,21 @@ pub fn start_video_processor(
         loop {
             debug!("Waiting for frame from network");
             let packet_bytes = conn.recv().await.unwrap();
-            let packet: Packet = wincode::deserialize(&packet_bytes).unwrap();
-            match packet {
-                Packet::Input { .. } => warn!("Watcher received an input packet"),
-                Packet::H264 {
-                    width,
-                    height,
-                    bytes,
-                    is_keyframe_start,
-                    // NOTE: timestamp is not accurate on remote devices as the internal clocks are not synchronized
-                    timestamp,
-                } => {
-                    let instant = Instant::now();
-                    let mut guard = frame_buffer.lock().unwrap();
-                    if is_keyframe_start {
-                        // Once a keyframe has arrived, processing older frames only adds unnecessary latency
-                        guard.clear();
-                    }
-                    guard.push_back((width, height, bytes.to_vec(), timestamp, instant));
-                }
-            };
+            let H264 {
+                width,
+                height,
+                bytes,
+                is_keyframe_start,
+                // NOTE: timestamp is not accurate on remote devices as the internal clocks are not synchronized
+                timestamp,
+            } = wincode::deserialize(&packet_bytes).unwrap();
+            let instant = Instant::now();
+            let mut guard = frame_buffer.lock().unwrap();
+            if is_keyframe_start {
+                // Once a keyframe has arrived, processing older frames only adds unnecessary latency
+                guard.clear();
+            }
+            guard.push_back((width, height, bytes.to_vec(), timestamp, instant));
         }
     });
     let mut decoder = None;
@@ -149,8 +144,7 @@ pub async fn start(
         video_texture_view,
         Role::Watcher,
         move |input| {
-            let packet = Packet::Input(input.clone());
-            let bytes = wincode::serialize(&packet).unwrap();
+            let bytes = wincode::serialize(&input).unwrap();
             streams.input.sender.send(&bytes).unwrap();
         },
     );
