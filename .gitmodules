@@ -16,3 +16,6 @@
 [submodule "avec"]
 	path = avec
 	url = ./avec
+[submodule "adieu"]
+	path = adieu
+	url = ./adieu

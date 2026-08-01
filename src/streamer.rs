@@ -1,4 +1,4 @@
-use anyhow::Context;
+use anyhow::{Context, bail};
 use enigo::{Enigo, Keyboard, Mouse};
 use fps_ticker::Fps;
 use log::{debug, error, info, trace};
@@ -54,12 +54,12 @@ fn send_nal_units(
     Ok(())
 }
 
-pub struct ScreenCapture {
+struct ScreenCapture {
     video: mpsc::Receiver<(janck::Frame, TimeStamp)>,
     info: janck::FrameInfo,
 }
 
-pub fn capture_screen() -> anyhow::Result<ScreenCapture> {
+fn capture_screen() -> anyhow::Result<ScreenCapture> {
     let (frame_sender, frame_receiver) = mpsc::sync_channel(0);
     let mut video = janck::capture_video(FRAME_RATE as _)?;
     let first_frame = video
@@ -78,9 +78,9 @@ pub fn capture_screen() -> anyhow::Result<ScreenCapture> {
     })
 }
 
-pub fn start_stream(
+fn start_video_stream(
     device: Arc<avec::Device>,
-    mut connection: UnreliableSender,
+    mut sender: UnreliableSender,
     screen_capture: ScreenCapture,
 ) -> JoinHandle<anyhow::Result<()>> {
     let handle = tokio::task::spawn_blocking(move || {
@@ -114,7 +114,7 @@ pub fn start_stream(
                 fps.avg()
             );
             send_nal_units(
-                &mut connection,
+                &mut sender,
                 &encoded.data,
                 encoded.is_keyframe,
                 width,
@@ -127,6 +127,78 @@ pub fn start_stream(
         Ok(())
     });
     info!("Started screen cast");
+    handle
+}
+
+struct AudioCapture {
+    audio: mpsc::Receiver<(adieu::Chunk, TimeStamp)>,
+    info: adieu::ChunkInfo,
+}
+
+fn capture_audio() -> anyhow::Result<AudioCapture> {
+    let mut iter = adieu::capture_audio()?;
+    let first_chunk = iter
+        .next()
+        .context("Failed to capture first chunk of audio");
+    let info = *first_chunk?.info();
+    // // TODO: support mono audio
+    // assert_eq!(info.channels, 2);
+    // let channels = opus::Channels::Stereo;
+    let (chunk_sender, chunk_receiver) = mpsc::sync_channel(0);
+
+    std::thread::spawn(move || {
+        for chunk in iter {
+            chunk_sender.send((chunk, TimeStamp::now())).unwrap();
+        }
+    });
+    Ok(AudioCapture {
+        audio: chunk_receiver,
+        info,
+    })
+}
+
+fn start_audio_stream(
+    mut sender: UnreliableSender,
+    audio_capture: AudioCapture,
+) -> JoinHandle<anyhow::Result<()>> {
+    let handle = tokio::task::spawn_blocking(move || {
+        let adieu::ChunkInfo {
+            channels,
+            format,
+            sample_rate,
+        } = audio_capture.info;
+        // TODO: also support other formats
+        assert_eq!(format, adieu::Format::F32);
+        let channels = match channels {
+            1 => opus::Channels::Mono,
+            2 => opus::Channels::Stereo,
+            _ => bail!(
+                "Only mono and stereo audio input is supported, but the application has {channels} channels"
+            ),
+        };
+        // NOTE: should Application::LowDelay or Application::Audio be used instead?
+        //       needs to be tested to see what the Opus encoding latency is normally and how it compares to the video encoding latency
+        let mut encoder = opus::Encoder::new(sample_rate, channels, opus::Application::Voip)?;
+        // TODO: consider using a smaller buffer and sending more small packets
+        let mut buffer = vec![0u8; 1_000_000];
+
+        for (chunk, timestamp) in audio_capture.audio {
+            // Encode chunk to Opus
+            let pre_encode = Instant::now();
+            let encoded_size = encoder.encode_float(chunk.samples_f32(), &mut buffer)?;
+            let encoded = &buffer[..encoded_size];
+            debug!("Encoding audio chunk took {:.2}ms", since(pre_encode));
+            debug!(
+                "Sending {} byte audio chunk ({:.2}ms latency)",
+                encoded_size,
+                timestamp.since()
+            );
+            sender.send(encoded)?;
+        }
+        error!("Audio capture stream ended");
+        Ok(())
+    });
+    info!("Started audio stream");
     handle
 }
 
@@ -244,18 +316,22 @@ pub async fn start(
     conn: Connection,
     streams: Streams,
 ) -> anyhow::Result<()> {
-    info!("Starting screen capture");
-    let screen_capture = capture_screen()?;
-    let screen_info = screen_capture.info;
-
     let inner_conn = conn.inner().clone();
     let inner_conn2 = conn.inner().clone();
     tokio::task::spawn(async move {
         error!("Connection closed: {}", inner_conn.closed().await);
     });
 
-    info!("Starting stream");
-    let stream_handle = start_stream(device, streams.video.sender, screen_capture);
+    info!("Starting screen capture");
+    let screen_capture = capture_screen()?;
+    let screen_info = screen_capture.info;
+    info!("Starting video stream");
+    let video_stream_handle = start_video_stream(device, streams.video.sender, screen_capture);
+
+    info!("Starting audio capture");
+    let audio_capture = capture_audio()?;
+    info!("Starting audio stream");
+    let audio_stream_handle = start_audio_stream(streams.audio.sender, audio_capture);
 
     info!("Starting input handler");
     let input_handle = start_input_handler(
@@ -276,7 +352,8 @@ pub async fn start(
     });
 
     tokio::select! {
-        join_result = stream_handle => join_result?,
+        join_result = video_stream_handle => join_result?,
+        join_result = audio_stream_handle => join_result?,
         join_result = input_handle => join_result?,
         join_result = ping_handle => join_result?,
     }

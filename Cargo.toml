@@ -18,12 +18,14 @@ tracing = { version = "0.1.44", features = ["log-always"] }
 chrono = "0.4.45"
 clap = { version = "4.6.4", features = ["derive"] }
 winit = "0.30.13"
+opus = { git = "https://github.com/SpaceManiac/opus-rs.git" }
 
 # TODO: use git paths once janck and netnet are stable
 janck = { path = "./janck" }
 netnet = { path = "./netnet" }
-avec = { version = "0.1.0", path = "avec" }
+avec = { path = "./avec" }
 fps_ticker = { path = "./fps_ticker" }
+adieu = { path = "./adieu" }
 
 # always use release profile for janck
 # settings from https://doc.rust-lang.org/cargo/reference/profiles.html#release

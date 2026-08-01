@@ -21,7 +21,7 @@ mod event_loop;
 // which is undesirable for this function as it spawns background tasks and then returns.
 pub fn start_video_processor(
     device: Arc<avec::Device>,
-    mut conn: UnreliableReceiver,
+    mut receiver: UnreliableReceiver,
     window: Arc<OnceLock<Weak<Window>>>,
     out_video_texture_view: Arc<OnceLock<wgpu::TextureView>>,
 ) -> impl Future<Output = anyhow::Result<()>> {
@@ -32,7 +32,7 @@ pub fn start_video_processor(
     let network_handle = tokio::task::spawn(async move {
         loop {
             debug!("Waiting for frame from network");
-            let packet_bytes = conn.recv().await.unwrap();
+            let packet_bytes = receiver.recv().await.unwrap();
             let H264 {
                 width,
                 height,
@@ -115,6 +115,10 @@ pub fn start_video_processor(
     }
 }
 
+pub fn start_audio_processor(mut receiver: UnreliableReceiver) {
+    todo!()
+}
+
 /// This function *must* be called from the main thread
 pub async fn start(
     instance: Arc<avec::Instance>,
@@ -136,6 +140,7 @@ pub async fn start(
         out_window.clone(),
         video_texture_view.clone(),
     );
+    let _audio_result_future = start_audio_processor(streams.audio.receiver);
     // This is a blocking call because the event loop *must* run on the main thread
     run_event_loop(
         instance,
