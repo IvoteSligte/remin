@@ -7,6 +7,9 @@ use crate::key::Key;
 
 pub const HOST_PORT: u16 = 8084;
 
+// Number of audio samples per channel per chunk. Corresponds to 2.5 ms of audio at 48000 hz.
+pub const AUDIO_SAMPLES_PER_CHUNK: usize = 120;
+
 #[derive(Debug, Default, Clone, SchemaWrite, SchemaRead)]
 pub struct Input {
     pub keys_pressed: HashSet<Key>,
@@ -17,7 +20,7 @@ pub struct Input {
     pub scroll: (f64, f64), // FIXME: calibrate
 }
 
-/// H.264 NAL unit (part of frame)
+/// H.264 video NAL unit (part of frame)
 #[derive(SchemaWrite, SchemaRead)]
 pub struct H264<'a> {
     pub width: u32,
@@ -25,6 +28,18 @@ pub struct H264<'a> {
     pub bytes: &'a [u8],
     /// True if this NAL unit is the first unit of a keyframe
     pub is_keyframe_start: bool,
+    /// Microseconds since UNIX epoch
+    pub timestamp: i64,
+}
+
+/// Opus audio chunk
+#[derive(SchemaWrite, SchemaRead)]
+pub struct Opus<'a> {
+    pub chunk_id: u64,
+    pub sample_rate: u32,
+    /// True if stereo, false if mono
+    pub is_stereo: bool,
+    pub bytes: &'a [u8],
     /// Microseconds since UNIX epoch
     pub timestamp: i64,
 }

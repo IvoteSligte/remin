@@ -26,6 +26,8 @@ netnet = { path = "./netnet" }
 avec = { path = "./avec" }
 fps_ticker = { path = "./fps_ticker" }
 adieu = { path = "./adieu" }
+cpal = { version = "0.18.1", features = ["pipewire", "realtime-dbus"] }
+rtrb = "0.3.4"
 
 # always use release profile for janck
 # settings from https://doc.rust-lang.org/cargo/reference/profiles.html#release
