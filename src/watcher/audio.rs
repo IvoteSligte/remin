@@ -189,7 +189,8 @@ pub fn start_processor(
                     let mut buffer = vec![0i16; buffer_len];
                     let decoded_len = decoder.decode(&bytes, &mut buffer, false).unwrap();
                     let decoded = &buffer[..decoded_len];
-                    { // TEMP DEBUG
+                    {
+                        // TEMP DEBUG
                         if i < 2000 {
                             let decoded_bytes = decoded
                                 .iter()
