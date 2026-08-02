@@ -13,6 +13,17 @@ enum AudioFormat {
     I16,
 }
 
+fn write_chunk<T: Copy>(producer: &mut rtrb::Producer<T>, chunk: &[T]) {
+    let mut guard = producer.write_chunk_uninit(chunk.len()).unwrap();
+    let (dst1, dst2) = guard.as_mut_slices();
+    let (src1, src2) = chunk.split_at(dst1.len());
+    unsafe {
+        dst1.write_copy_of_slice(src1);
+        dst2.write_copy_of_slice(src2);
+        guard.commit_all();
+    }
+}
+
 enum AudioWriter {
     F32(rtrb::Producer<f32>),
     I16(rtrb::Producer<i16>),
@@ -96,12 +107,7 @@ impl AudioPlayback {
         self.get_error()?;
         match &mut self.writer {
             AudioWriter::F32(writer) => {
-                let mut guard = writer.write_chunk(chunk.len())?;
-                let (dst1, dst2) = guard.as_mut_slices();
-                let (src1, src2) = chunk.split_at(dst1.len());
-                dst1.copy_from_slice(src1);
-                dst2.copy_from_slice(src2);
-                guard.commit_all();
+                write_chunk(writer, chunk);
                 Ok(())
             }
             _ => bail!("Audio format mismatch"),
@@ -112,12 +118,7 @@ impl AudioPlayback {
         self.get_error()?;
         match &mut self.writer {
             AudioWriter::I16(writer) => {
-                let mut guard = writer.write_chunk(chunk.len())?;
-                let (dst1, dst2) = guard.as_mut_slices();
-                let (src1, src2) = chunk.split_at(dst1.len());
-                dst1.copy_from_slice(src1);
-                dst2.copy_from_slice(src2);
-                guard.commit_all();
+                write_chunk(writer, chunk);
                 Ok(())
             }
             _ => bail!("Audio format mismatch"),
