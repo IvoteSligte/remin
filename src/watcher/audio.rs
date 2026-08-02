@@ -36,6 +36,9 @@ struct AudioPlayback {
     _stream: cpal::Stream,
 }
 
+// FIXME: there is a feedback loop only if there is audio when the stream starts
+//        unmuting the audio of the application being recorded *after* starting
+//        the stream makes it so that there is no feedback loop
 impl AudioPlayback {
     pub fn new(channels: u32, sample_rate: u32) -> anyhow::Result<Self> {
         let host = cpal::default_host();
@@ -162,8 +165,7 @@ pub fn start_processor(
     });
     let mut state = None;
     let processor_handle = tokio::task::spawn_blocking(move || {
-        let mut file = Some(std::fs::File::create("test.pcm").unwrap()); // TEMP
-        let mut i = 0;
+        let mut buffer = Vec::with_capacity(40_000);
         // TODO: handle packet loss, using chunk IDs and opus::Decoder::decode docs
         while let Some((sample_rate, is_stereo, bytes, _timestamp, _instant)) =
             local_receiver.blocking_recv()
@@ -180,31 +182,16 @@ pub fn start_processor(
             let buffer_len = AUDIO_SAMPLES_PER_CHUNK * num_channels as usize;
             match playback.format() {
                 AudioFormat::F32 => {
-                    // TODO: do not allocate
-                    let mut buffer = vec![0f32; buffer_len];
-                    let decoded_len = decoder.decode_float(&bytes, &mut buffer, false).unwrap();
-                    let decoded = &buffer[..decoded_len];
-                    playback.write_chunk_f32(decoded).unwrap();
+                    todo!()
                 }
                 AudioFormat::I16 => {
-                    let mut buffer = vec![0i16; buffer_len];
-                    let decoded_len = decoder.decode(&bytes, &mut buffer, false).unwrap();
-                    let decoded = &buffer[..decoded_len];
-                    {
-                        // TEMP DEBUG
-                        if i < 2000 {
-                            let decoded_bytes = decoded
-                                .iter()
-                                .flat_map(|b| (*b).to_le_bytes())
-                                .collect::<Vec<u8>>();
-                            file.as_mut().unwrap().write_all(&decoded_bytes).unwrap();
-                            dbg!(i);
-                            i += 1;
-                            if i == 2000 {
-                                file.take();
-                            }
-                        }
+                    buffer.clear();
+                    for i in (0..bytes.len()).step_by(2) {
+                        buffer.push(i16::from_le_bytes([bytes[i], bytes[i + 1]]));
                     }
+                    let decoded = &buffer[..];
+                    // let decoded_len = decoder.decode(&bytes, &mut buffer, false).unwrap();
+                    // let decoded = &buffer[..decoded_len];
                     playback.write_chunk_i16(decoded).unwrap();
                 }
             };
