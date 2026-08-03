@@ -6,8 +6,8 @@ use std::time::Duration;
 use crate::net::Streams;
 
 mod audio;
-mod video;
 mod input;
+mod video;
 
 pub async fn start(
     device: Arc<avec::Device>,

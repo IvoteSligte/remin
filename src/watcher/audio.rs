@@ -65,7 +65,7 @@ impl AudioPlayback {
                         move |output, _info| {
                             let (_, remainder) = reader.pop_partial_slice(output);
                             if !remainder.is_empty() {
-                                debug!("Not enough audio data to fill the target buffer");
+                                info!("Not enough audio data to fill the target buffer");
                             }
                             remainder.fill(<_ as cpal::Sample>::EQUILIBRIUM);
                         },
@@ -166,7 +166,6 @@ pub fn start_processor(
     let mut state = None;
     let processor_handle = tokio::task::spawn_blocking(move || {
         let mut buffer = Vec::with_capacity(40_000);
-        // TODO: handle packet loss, using chunk IDs and opus::Decoder::decode docs
         while let Some((sample_rate, is_stereo, bytes, _timestamp, _instant)) =
             local_receiver.blocking_recv()
         {
