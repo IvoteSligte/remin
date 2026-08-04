@@ -1,6 +1,6 @@
 use anyhow::{anyhow, bail};
 use cpal::traits::{DeviceTrait, HostTrait};
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use netnet::UnreliableReceiver;
 
 use std::time::Instant;
@@ -14,14 +14,12 @@ enum AudioFormat {
 }
 
 fn write_chunk<T: Copy>(producer: &mut rtrb::Producer<T>, chunk: &[T]) {
-    let mut guard = producer.write_chunk_uninit(chunk.len()).unwrap();
-    let (dst1, dst2) = guard.as_mut_slices();
-    let (src1, src2) = chunk.split_at(dst1.len());
-    unsafe {
-        dst1.write_copy_of_slice(src1);
-        dst2.write_copy_of_slice(src2);
-        guard.commit_all();
-    }
+    let (written, _) = producer.push_partial_slice(chunk);
+    warn!(
+        "Ring buffer full: could only write {}/{} samples",
+        written.len(),
+        chunk.len()
+    );
 }
 
 enum AudioWriter {
