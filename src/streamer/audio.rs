@@ -16,7 +16,7 @@ pub(crate) fn start_stream(mut sender: UnreliableSender) -> anyhow::Result<()> {
     let mut chunk_id = 0;
     let mut soft_clip = None;
 
-    adieu::capture_audio(move |chunk, info| {
+    adieu::capture_audio(Some("remin-audio-capture"), move |chunk, info| {
         let adieu::ChunkInfo {
             channels: num_channels,
             sample_rate,
