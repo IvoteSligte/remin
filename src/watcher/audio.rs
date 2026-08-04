@@ -36,9 +36,6 @@ struct AudioPlayback {
     _stream: cpal::Stream,
 }
 
-// FIXME: there is a feedback loop only if there is audio when the stream starts
-//        unmuting the audio of the application being recorded *after* starting
-//        the stream makes it so that there is no feedback loop
 impl AudioPlayback {
     pub fn new(channels: u32, sample_rate: u32) -> anyhow::Result<Self> {
         let host = cpal::default_host();
