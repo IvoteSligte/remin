@@ -93,8 +93,6 @@ pub enum Key {
     Numpad9,
     PageDown,
     PageUp,
-    #[cfg(all(unix, not(target_os = "macos")))]
-    Redo,
     Return,
     RightArrow,
     Shift,
@@ -260,7 +258,6 @@ impl From<Key> for Enigo {
             Key::Numpad9 => Enigo::Numpad9,
             Key::PageDown => Enigo::PageDown,
             Key::PageUp => Enigo::PageUp,
-            Key::Redo => Enigo::Redo,
             Key::Return => Enigo::Return,
             Key::RightArrow => Enigo::RightArrow,
             Key::Shift => Enigo::Shift,
