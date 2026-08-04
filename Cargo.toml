@@ -20,7 +20,6 @@ clap = { version = "4.6.4", features = ["derive"] }
 winit = "0.30.13"
 # Using the Git because the latest crates.io version relies on outdated CMake.
 opus = { git = "https://github.com/SpaceManiac/opus-rs.git" }
-cpal = { version = "0.18.1", features = ["pipewire", "realtime-dbus"] }
 rtrb = "0.3.4"
 
 # TODO: use git paths once janck and netnet are stable
@@ -29,6 +28,12 @@ netnet = { path = "./netnet" }
 avec = { path = "./avec" }
 fps_ticker = { path = "./fps_ticker" }
 adieu = { path = "./adieu" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+cpal = { version = "0.18.1", features = ["pipewire", "realtime-dbus"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+cpal = { version = "0.18.1", features = ["asio"] }
 
 # always use release profile for janck
 # settings from https://doc.rust-lang.org/cargo/reference/profiles.html#release
