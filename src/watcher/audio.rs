@@ -1,5 +1,5 @@
 use anyhow::{anyhow, bail};
-use cpal::traits::{DeviceTrait, HostTrait};
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use log::{debug, error, info, warn};
 use netnet::UnreliableReceiver;
 
@@ -14,12 +14,14 @@ enum AudioFormat {
 }
 
 fn write_chunk<T: Copy>(producer: &mut rtrb::Producer<T>, chunk: &[T]) {
-    let (written, _) = producer.push_partial_slice(chunk);
-    warn!(
-        "Ring buffer full: could only write {}/{} samples",
-        written.len(),
-        chunk.len()
-    );
+    let (written, remainder) = producer.push_partial_slice(chunk);
+    if !remainder.is_empty() {
+        warn!(
+            "Ring buffer full: wrote {}/{} samples",
+            written.len(),
+            chunk.len()
+        );
+    }
 }
 
 enum AudioWriter {
@@ -69,6 +71,7 @@ impl AudioPlayback {
                 cpal::SampleFormat::I16 => build_output_stream!(I16),
                 _ => continue,
             };
+            stream.play()?;
             return Ok(Self {
                 format,
                 writer,
