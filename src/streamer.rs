@@ -26,10 +26,8 @@ pub async fn start(
     info!("Starting video stream");
     let video_stream_handle = video::start_stream(device, streams.video.sender, screen_capture);
 
-    info!("Starting audio capture");
-    let audio_capture = audio::capture_audio()?;
     info!("Starting audio stream");
-    let audio_stream_handle = audio::start_stream(streams.audio.sender, audio_capture);
+    audio::start_stream(streams.audio.sender)?;
 
     info!("Starting input handler");
     let input_handle = input::start_processor(
@@ -51,7 +49,6 @@ pub async fn start(
 
     tokio::select! {
         join_result = video_stream_handle => join_result?,
-        join_result = audio_stream_handle => join_result?,
         join_result = input_handle => join_result?,
         join_result = ping_handle => join_result?,
     }

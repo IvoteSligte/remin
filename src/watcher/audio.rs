@@ -3,7 +3,7 @@ use cpal::traits::{DeviceTrait, HostTrait};
 use log::{debug, error, info};
 use netnet::UnreliableReceiver;
 
-use std::{io::Write, time::Instant};
+use std::time::Instant;
 
 use crate::common::{AUDIO_SAMPLES_PER_CHUNK, Opus};
 

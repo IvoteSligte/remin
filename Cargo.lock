@@ -25,7 +25,6 @@ dependencies = [
  "libspa",
  "log",
  "pipewire",
- "rtrb",
  "thiserror 2.0.19",
 ]
 
