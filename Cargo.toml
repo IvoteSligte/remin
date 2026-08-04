@@ -30,10 +30,10 @@ fps_ticker = { path = "./fps_ticker" }
 adieu = { path = "./adieu" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-cpal = { version = "0.18.1", features = ["pipewire", "realtime-dbus"] }
+cpal = { path = "../cpal", features = ["pipewire", "realtime-dbus"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-cpal = { version = "0.18.1", features = ["asio"] }
+cpal = { path = "../cpal", features = ["asio"] }
 
 # always use release profile for janck
 # settings from https://doc.rust-lang.org/cargo/reference/profiles.html#release
