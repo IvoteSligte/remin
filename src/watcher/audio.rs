@@ -47,11 +47,6 @@ impl AudioPlayback {
             if config.channels() as u32 != channels || !config.contains_rate(sample_rate) {
                 continue;
             }
-            // TODO: prefer smaller buffer sizes as it means more frequent updates
-            let supported_buffer_sizes = match config.buffer_size().clone() {
-                cpal::SupportedBufferSize::Range { min, max } => Some(min..max),
-                cpal::SupportedBufferSize::Unknown => None,
-            };
             let (error_sender, error_receiver) = std::sync::mpsc::sync_channel::<cpal::Error>(0);
 
             macro_rules! build_output_stream {
@@ -64,7 +59,6 @@ impl AudioPlayback {
                             if !remainder.is_empty() {
                                 info!("Not enough audio data to fill the target buffer");
                             }
-                            remainder.fill(<_ as cpal::Sample>::EQUILIBRIUM);
                         },
                         move |err| error_sender.send(err).unwrap(),
                         None,

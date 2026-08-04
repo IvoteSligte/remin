@@ -14,6 +14,7 @@ pub(crate) fn start_stream(mut sender: UnreliableSender) -> anyhow::Result<()> {
     // // TODO: consider using a smaller buffer and sending more small packets
     // let mut buffer = vec![0u8; 1_000_000];
     let mut chunk_id = 0;
+    let mut soft_clip = None;
 
     adieu::capture_audio(move |chunk, info| {
         let adieu::ChunkInfo {
@@ -27,6 +28,7 @@ pub(crate) fn start_stream(mut sender: UnreliableSender) -> anyhow::Result<()> {
                 "Only mono and stereo audio input is supported, but the application has {num_channels} channels"
             ),
         };
+        let soft_clip = soft_clip.get_or_insert_with(|| opus::SoftClip::new(channels));
 
         // Encode chunk to Opus
         let pre_encode = Instant::now();
@@ -38,13 +40,17 @@ pub(crate) fn start_stream(mut sender: UnreliableSender) -> anyhow::Result<()> {
         // let encoded = &buffer[..encoded_size];
 
         let i16_encoded: Vec<u8> = match chunk {
-            adieu::Chunk::F32(floats) => floats
-                .iter()
-                .flat_map(|f| {
-                    let n = (f.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16;
-                    n.to_le_bytes()
-                })
-                .collect(),
+            adieu::Chunk::F32(floats) => {
+                let mut floats = floats.to_vec();
+                soft_clip.apply(&mut floats);
+                floats
+                    .iter()
+                    .flat_map(|f| {
+                        let n = (f * i16::MAX as f32).round() as i16;
+                        n.to_le_bytes()
+                    })
+                    .collect()
+            }
             adieu::Chunk::I16(ints) => ints.iter().flat_map(|n| n.to_le_bytes()).collect(),
         };
 
