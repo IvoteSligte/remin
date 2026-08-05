@@ -244,12 +244,12 @@ impl ApplicationHandler for App {
             WindowEvent::MouseWheel { delta, .. } => {
                 match delta {
                     MouseScrollDelta::LineDelta(lines_x, lines_y) => {
-                        self.input.scroll.0 += (2.5 * lines_x) as f64;
-                        self.input.scroll.1 += (2.5 * lines_y) as f64;
+                        self.input.scroll.0 += lines_x as f64;
+                        self.input.scroll.1 += lines_y as f64;
                     }
                     MouseScrollDelta::PixelDelta(physical_position) => {
-                        self.input.scroll.0 += physical_position.x * 0.5;
-                        self.input.scroll.1 += physical_position.y * 0.5;
+                        self.input.scroll.0 += physical_position.x;
+                        self.input.scroll.1 += physical_position.y;
                     }
                 }
                 self.on_input()
