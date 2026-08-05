@@ -34,12 +34,6 @@ pub(crate) fn start_stream(mut sender: UnreliableSender) -> anyhow::Result<()> {
         // Encode chunk to Opus
         let pre_encode = Instant::now();
 
-        // let encoded_size = match encoder.encode_float(&chunk, &mut buffer) {
-        //     Ok(ok) => ok,
-        //     Err(err) => panic!("Failed to encode chunk using Opus: {err}"),
-        // };
-        // let encoded = &buffer[..encoded_size];
-
         buffer.clear();
         match chunk {
             adieu::Chunk::F32(floats) => {
