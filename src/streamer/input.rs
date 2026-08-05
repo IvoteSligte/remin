@@ -104,9 +104,9 @@ pub fn start_processor(
                 let diff_y = input.scroll.1 - prev_input.scroll.1;
                 debug!("Mouse scrolled by {:.0},{:.0}", diff_x, diff_y);
                 enigo
-                    .scroll(diff_x as i32, enigo::Axis::Horizontal)
+                    .scroll(-diff_x as i32, enigo::Axis::Horizontal)
                     .unwrap();
-                enigo.scroll(diff_y as i32, enigo::Axis::Vertical).unwrap();
+                enigo.scroll(-diff_y as i32, enigo::Axis::Vertical).unwrap();
                 prev_input.scroll = input.scroll;
             }
         }
