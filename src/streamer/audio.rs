@@ -15,6 +15,7 @@ pub(crate) fn start_stream(mut sender: UnreliableSender) -> anyhow::Result<()> {
     // let mut buffer = vec![0u8; 1_000_000];
     let mut chunk_id = 0;
     let mut soft_clip = None;
+    let mut buffer = Vec::with_capacity(4000);
 
     adieu::capture_audio(Some("remin-audio-capture"), move |chunk, info| {
         let adieu::ChunkInfo {
@@ -39,31 +40,27 @@ pub(crate) fn start_stream(mut sender: UnreliableSender) -> anyhow::Result<()> {
         // };
         // let encoded = &buffer[..encoded_size];
 
-        let i16_encoded: Vec<u8> = match chunk {
+        buffer.clear();
+        match chunk {
             adieu::Chunk::F32(floats) => {
-                let mut floats = floats.to_vec();
-                soft_clip.apply(&mut floats);
-                floats
-                    .iter()
-                    .flat_map(|f| {
-                        let n = (f * i16::MAX as f32).round() as i16;
-                        n.to_le_bytes()
-                    })
-                    .collect()
+                soft_clip.apply(floats);
+                buffer.extend(floats.iter().flat_map(|f| {
+                    let n = (f * i16::MAX as f32).round() as i16;
+                    n.to_le_bytes()
+                }));
             }
-            adieu::Chunk::I16(ints) => ints.iter().flat_map(|n| n.to_le_bytes()).collect(),
+            adieu::Chunk::I16(ints) => buffer.extend(ints.iter().flat_map(|n| n.to_le_bytes())),
         };
-
         debug!(
             "Encoding {} byte audio chunk took {:.2}ms",
-            i16_encoded.len(),
+            buffer.len(),
             since(pre_encode)
         );
         let bytes = wincode::serialize(&Opus {
             chunk_id,
             sample_rate,
             is_stereo: channels == opus::Channels::Stereo,
-            bytes: &i16_encoded,
+            bytes: &buffer,
             timestamp: TimeStamp::now().raw(),
         })
         .unwrap();
