@@ -91,7 +91,7 @@ pub fn start_processor(
                 bytes,
                 // NOTE: timestamp is not accurate on remote devices as the internal clocks are not synchronized
                 timestamp,
-            } = wincode::deserialize(&packet_bytes).unwrap();
+            } = wincode::deserialize(packet_bytes).unwrap();
             if last_chunk_id + 1 < chunk_id {
                 debug!(
                     "Lost audio packets {} to {}",

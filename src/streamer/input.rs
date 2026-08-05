@@ -26,7 +26,7 @@ pub fn start_processor(
 
         loop {
             let bytes = connection.recv().await.unwrap();
-            let input: Input = wincode::deserialize(&bytes).unwrap();
+            let input: Input = wincode::deserialize(bytes).unwrap();
             let just_released = prev_input.keys_pressed.difference(&input.keys_pressed);
             let just_pressed = input.keys_pressed.difference(&prev_input.keys_pressed);
             for &key in just_released {

@@ -34,7 +34,7 @@ pub fn start_processor(
                 is_keyframe_start,
                 // NOTE: timestamp is not accurate on remote devices as the internal clocks are not synchronized
                 timestamp,
-            } = wincode::deserialize(&packet_bytes).unwrap();
+            } = wincode::deserialize(packet_bytes).unwrap();
             let instant = Instant::now();
             let mut guard = frame_buffer.lock().unwrap();
             if is_keyframe_start {
