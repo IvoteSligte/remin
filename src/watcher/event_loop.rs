@@ -9,7 +9,7 @@ use winit::{
     event::{DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop},
     keyboard::{ModifiersKeyState, PhysicalKey},
-    window::{CursorGrabMode, Window, WindowId},
+    window::{CursorGrabMode, Fullscreen, Window, WindowId},
 };
 
 use crate::{Role, common::Input, key::Key};
@@ -221,6 +221,17 @@ impl ApplicationHandler for App {
                     warn!("Unknown key: {:?}", key_code);
                     return;
                 };
+                if key == Key::F11 {
+                    if event.state == ElementState::Pressed {
+                        if let Some(window) = self.window.as_ref() {
+                            match window.fullscreen() {
+                                Some(_) => window.set_fullscreen(None),
+                                None => window.set_fullscreen(Some(Fullscreen::Borderless(None))),
+                            }
+                        }
+                    }
+                    return;
+                }
                 match event.state {
                     ElementState::Pressed => {
                         if self.ignore_key_press {

@@ -132,6 +132,8 @@ impl TryFrom<Winit> for Key {
             Winit::F8 => Key::F8,
             Winit::F9 => Key::F9,
             Winit::F10 => Key::F10,
+            Winit::F11 => Key::F11,
+            Winit::F12 => Key::F12,
             Winit::Help => Key::Help,
             Winit::Home => Key::Home,
             Winit::ArrowLeft => Key::LeftArrow,
