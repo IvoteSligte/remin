@@ -7,9 +7,6 @@ use crate::key::Key;
 
 pub const HOST_PORT: u16 = 8084;
 
-// Number of audio samples per channel per chunk. Corresponds to 2.5 ms of audio at 48000 hz.
-pub const AUDIO_SAMPLES_PER_CHUNK: usize = 120;
-
 #[derive(Debug, Default, Clone, SchemaWrite, SchemaRead)]
 pub struct Input {
     pub keys_pressed: HashSet<Key>,
@@ -17,7 +14,7 @@ pub struct Input {
     pub left_mouse_pressed: bool,
     pub middle_mouse_pressed: bool,
     pub right_mouse_pressed: bool,
-    pub scroll: (f64, f64), // FIXME: calibrate
+    pub scroll: (f64, f64),
 }
 
 /// H.264 video NAL unit (part of frame)
@@ -45,12 +42,12 @@ pub struct Opus<'a> {
 }
 
 /// Returns the time in milliseconds since `start`
-pub(crate) fn since(start: Instant) -> f32 {
+pub fn since(start: Instant) -> f32 {
     (Instant::now() - start).as_micros() as f32 / 1000.0
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct TimeStamp(DateTime<Utc>);
+pub struct TimeStamp(DateTime<Utc>);
 
 impl TimeStamp {
     pub fn now() -> Self {

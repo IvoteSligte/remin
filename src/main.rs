@@ -14,7 +14,7 @@ mod net;
 mod streamer;
 mod watcher;
 
-// TODO: F11 for fullscreen, F12 for quit
+// TODO: F12 for quit
 
 #[derive(Parser)]
 struct Args {
@@ -43,6 +43,7 @@ fn run_host(
 ) -> anyhow::Result<impl Future<Output = anyhow::Result<()>>> {
     let device = device.clone();
     let future = net::host_server()?;
+
     Ok(async move {
         let (conn, mut streams) = future.await?;
         streams.send_role(role).await?;
