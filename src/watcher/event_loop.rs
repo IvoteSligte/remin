@@ -7,12 +7,16 @@ use log::{debug, error, info, warn};
 use winit::{
     application::ApplicationHandler,
     event::{DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
-    event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop},
+    event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop, EventLoopProxy},
     keyboard::{ModifiersKeyState, PhysicalKey},
     window::{CursorGrabMode, Fullscreen, Window, WindowId},
 };
 
 use crate::{Role, common::Input, key::Key};
+
+enum UserEvent {
+    ScheduledOnInput,
+}
 
 struct App {
     instance: wgpu::Instance,
@@ -22,10 +26,15 @@ struct App {
     surface: Option<wgpu::Surface<'static>>,
     video_texture_view: Arc<OnceLock<wgpu::TextureView>>,
     blitter: wgpu::util::TextureBlitter,
+    event_loop_proxy: Arc<EventLoopProxy<UserEvent>>,
     role: Role,
     ignore_key_press: bool,
     input: Input,
     on_input: Box<dyn FnMut(&Input)>,
+    /// True if an on_input event has been scheduled using [UserEvent::ScheduledOnInput].
+    /// This is useful for aggregating input events that are otherwise emitted too often,
+    /// such as raw mouse motion device events.
+    on_input_scheduled: bool,
 }
 
 const SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -36,6 +45,7 @@ impl App {
         device: Arc<avec::Device>,
         out_window: Arc<OnceLock<Weak<Window>>>,
         video_texture_view: Arc<OnceLock<wgpu::TextureView>>,
+        event_loop_proxy: EventLoopProxy<UserEvent>,
         role: Role,
         on_input: impl FnMut(&Input) + 'static,
     ) -> Self {
@@ -50,10 +60,12 @@ impl App {
             out_window,
             surface: None,
             video_texture_view,
+            event_loop_proxy: Arc::new(event_loop_proxy),
             role,
             ignore_key_press: false,
             input: Input::default(),
             on_input: Box::new(on_input),
+            on_input_scheduled: false,
         }
     }
 
@@ -178,7 +190,7 @@ impl App {
     }
 }
 
-impl ApplicationHandler for App {
+impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         info!("Application resumed");
 
@@ -296,9 +308,21 @@ impl ApplicationHandler for App {
                 let size = window.inner_size();
                 self.input.mouse_position.0 += delta.0 / size.width as f64;
                 self.input.mouse_position.1 += delta.1 / size.height as f64;
-                self.on_input()
+                if !self.on_input_scheduled {
+                    let proxy = self.event_loop_proxy.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(Duration::from_millis(1)).await;
+                        let _ = proxy.send_event(UserEvent::ScheduledOnInput);
+                    });
+                }
             }
             _ => {}
+        }
+    }
+
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
+        match event {
+            UserEvent::ScheduledOnInput => self.on_input(),
         }
     }
 }
@@ -312,7 +336,7 @@ pub fn run_event_loop(
     role: Role,
     on_input: impl FnMut(&Input) + Send + 'static,
 ) {
-    let event_loop = EventLoop::new().unwrap();
+    let event_loop = EventLoop::with_user_event().build().unwrap();
     event_loop.set_control_flow(ControlFlow::Poll);
     event_loop.listen_device_events(DeviceEvents::WhenFocused);
     let mut app = App::new(
@@ -320,6 +344,7 @@ pub fn run_event_loop(
         device,
         out_window,
         video_texture_view,
+        event_loop.create_proxy(),
         role,
         on_input,
     );
