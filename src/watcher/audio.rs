@@ -1,9 +1,11 @@
+use std::time::Instant;
+
 use anyhow::anyhow;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use log::{debug, info, warn};
 use netnet::UnreliableReceiver;
 
-use crate::common::{Opus, TimeStamp};
+use crate::common::{Opus, TimeStamp, since};
 
 struct AudioPlayback {
     writer: rtrb::Producer<i16>,
@@ -14,10 +16,10 @@ struct AudioPlayback {
 impl AudioPlayback {
     pub fn new(channels: u32, sample_rate: u32) -> anyhow::Result<Self> {
         let host = cpal::default_host();
-        // TODO: support running remin on PCs without an audio output device
-        let device = host
-            .default_output_device()
-            .expect("No audio output device found");
+        let Some(device) = host.default_output_device() else {
+            warn!("No audio output device found");
+            return Err(anyhow!("No audio output device found"));
+        };
         for config in device.supported_output_configs()? {
             if config.channels() as u32 != channels
                 || !config.contains_rate(sample_rate)
@@ -79,8 +81,8 @@ pub fn start_processor(
 ) -> impl Future<Output = anyhow::Result<()>> {
     let network_handle = tokio::task::spawn(async move {
         let mut last_chunk_id = 0;
-        let mut buffer = Vec::with_capacity(4000);
-        let mut playback = None;
+        let mut decode_buffer = vec![<i16 as cpal::Sample>::EQUILIBRIUM; 4000];
+        let mut state = None;
         loop {
             debug!("Waiting for audio chunk from network");
             let packet_bytes = receiver.recv().await.unwrap();
@@ -93,27 +95,36 @@ pub fn start_processor(
                 timestamp,
             } = wincode::deserialize(packet_bytes).unwrap();
             if last_chunk_id + 1 < chunk_id {
-                debug!(
+                warn!(
                     "Lost audio packets {} to {}",
                     last_chunk_id + 1,
                     chunk_id - 1
                 );
             }
             let _timestamp = TimeStamp::from_raw(timestamp);
-            let num_channels = match is_stereo {
-                false => 1,
-                true => 2,
+            let (channels, num_channels) = match is_stereo {
+                false => (opus::Channels::Mono, 1),
+                true => (opus::Channels::Stereo, 2),
             };
-            let playback = playback
-                .get_or_insert_with(|| AudioPlayback::new(num_channels, sample_rate).unwrap());
-
-            buffer.clear();
-            for i in (0..bytes.len()).step_by(2) {
-                buffer.push(i16::from_le_bytes([bytes[i], bytes[i + 1]]));
-            }
-            let decoded = &buffer[..];
+            let (decoder, playback) = state.get_or_insert_with(|| {
+                (
+                    opus::Decoder::new(sample_rate, channels).unwrap(),
+                    AudioPlayback::new(num_channels, sample_rate).unwrap(),
+                )
+            });
+            let pre_decode = Instant::now();
+            let decode_len =
+                decoder.decode(bytes, &mut decode_buffer, false).unwrap() * num_channels as usize;
+            let decoded = &decode_buffer[..decode_len];
             playback.write_chunk(decoded).unwrap();
             last_chunk_id = chunk_id;
+            debug!(
+                "Decoding and writing {} byte -> {} sample audio chunk {} took {:.2}ms",
+                bytes.len(),
+                decoded.len(),
+                chunk_id,
+                since(pre_decode)
+            );
         }
     });
     async move { network_handle.await? }
