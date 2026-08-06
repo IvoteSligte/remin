@@ -145,11 +145,19 @@ impl App {
         let egui_ctx = egui_winit.egui_ctx();
         let full_output = egui_ctx.run_ui(raw_input, |ui| {
             let video_texture = video_texture_view.texture();
+            let video_width = video_texture.width();
+            let video_height = video_texture.height();
             let video_texture_image = egui::ImageSource::Texture(egui::load::SizedTexture {
                 id: video_texture_id,
-                size: egui::Vec2::new(video_texture.width() as _, video_texture.height() as _),
+                size: egui::Vec2::new(video_width as _, video_height as _),
             });
-            ui.image(video_texture_image);
+            ui.centered_and_justified(|ui| {
+                ui.add(
+                    egui::Image::new(video_texture_image)
+                        .maintain_aspect_ratio(true)
+                        .max_size(ui.content_rect().size()),
+                )
+            });
         });
         let device = self.device.wgpu_device();
         let queue = self.device.wgpu_queue();
