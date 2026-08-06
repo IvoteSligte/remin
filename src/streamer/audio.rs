@@ -1,4 +1,4 @@
-use log::{debug, info};
+use log::{debug, error, info};
 use netnet::UnreliableSender;
 use std::time::Instant;
 
@@ -61,7 +61,7 @@ pub(crate) fn start_stream(mut sender: UnreliableSender) -> anyhow::Result<()> {
     let mut buffer_ints = Vec::new();
     let mut encode_buffer = vec![0u8; 4000];
 
-    adieu::capture_audio(Some("remin-audio-capture"), move |chunk, info| {
+    let result = adieu::capture_audio(Some("remin-audio-capture"), move |chunk, info| {
         let adieu::ChunkInfo {
             channels: num_channels,
             sample_rate,
@@ -115,7 +115,11 @@ pub(crate) fn start_stream(mut sender: UnreliableSender) -> anyhow::Result<()> {
                 );
             }
         }
-    })?;
+    });
+    if let Err(err) = result {
+        error!("Failed to capture audio: {err}");
+        return Err(err.into());
+    }
     info!("Started audio stream");
     Ok(())
 }

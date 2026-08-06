@@ -27,6 +27,8 @@ dependencies = [
  "pipewire",
  "thiserror 2.0.19",
  "wasapi",
+ "windows",
+ "windows-result",
 ]
 
 [[package]]
