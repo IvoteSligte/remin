@@ -21,6 +21,9 @@ winit = "0.30.13"
 # Using the Git because the latest crates.io version relies on outdated CMake.
 opus = { git = "https://github.com/SpaceManiac/opus-rs.git" }
 rtrb = "0.3.4"
+egui = "0.35.0"
+egui-wgpu = "0.35.0" # using 0.35 instead of 0.36 because gpu-video requires wgpu 0.29
+egui-winit = { version = "0.35.0", default-features = false, features = ["wayland", "x11"] }
 
 # TODO: use git paths once janck and netnet are stable
 janck = { path = "./janck" }

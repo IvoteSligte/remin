@@ -4,6 +4,7 @@ use std::{
 };
 
 use log::{debug, error, info, warn};
+use wgpu::rwh::HasDisplayHandle;
 use winit::{
     application::ApplicationHandler,
     event::{DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
@@ -24,8 +25,10 @@ struct App {
     window: Option<Arc<Window>>,
     out_window: Arc<OnceLock<Weak<Window>>>,
     surface: Option<wgpu::Surface<'static>>,
+    egui_winit: Option<egui_winit::State>,
+    egui_renderer: egui_wgpu::Renderer,
     video_texture_view: Arc<OnceLock<wgpu::TextureView>>,
-    blitter: wgpu::util::TextureBlitter,
+    video_texture_id: Option<egui::TextureId>,
     event_loop_proxy: Arc<EventLoopProxy<UserEvent>>,
     role: Role,
     ignore_key_press: bool,
@@ -50,16 +53,20 @@ impl App {
         on_input: impl FnMut(&Input) + 'static,
     ) -> Self {
         Self {
-            // TODO: nicer downscaling? maybe with mipmaps? or otherwise a GUI backend such as FemtoVG
-            blitter: wgpu::util::TextureBlitterBuilder::new(&device.wgpu_device(), SURFACE_FORMAT)
-                .sample_type(wgpu::FilterMode::Linear)
-                .build(),
             instance: instance.wgpu_instance(),
+            egui_renderer: egui_wgpu::Renderer::new(
+                &device.wgpu_device(),
+                SURFACE_FORMAT,
+                egui_wgpu::RendererOptions::default(),
+            ),
             device,
             window: None,
             out_window,
             surface: None,
+            egui_winit: None,
+            // TODO: mipmaps for downscaling
             video_texture_view,
+            video_texture_id: None,
             event_loop_proxy: Arc::new(event_loop_proxy),
             role,
             ignore_key_press: false,
@@ -89,25 +96,18 @@ impl App {
             .configure(&self.device.wgpu_device(), &surface_config);
     }
 
-    fn render(&mut self) {
-        let Some(video_texture_view) = self.video_texture_view.get() else {
-            warn!("Trying to render, but the video texture view is not yet set");
-            return;
-        };
-        debug!("Rendering");
-        let surface_texture = match self.surface.as_ref().unwrap().get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(texture) => texture,
-            wgpu::CurrentSurfaceTexture::Occluded | wgpu::CurrentSurfaceTexture::Timeout => return,
+    fn get_current_surface_texture(&mut self) -> Option<wgpu::SurfaceTexture> {
+        match self.surface.as_ref().unwrap().get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(texture) => return Some(texture),
+            wgpu::CurrentSurfaceTexture::Occluded | wgpu::CurrentSurfaceTexture::Timeout => (),
             wgpu::CurrentSurfaceTexture::Suboptimal(texture) => {
                 warn!("Suboptimal surface texture retrieved");
                 drop(texture);
                 self.configure_surface();
-                return;
             }
             wgpu::CurrentSurfaceTexture::Outdated => {
                 warn!("Outdated surface texture retrieved");
                 self.configure_surface();
-                return;
             }
             wgpu::CurrentSurfaceTexture::Validation => {
                 unreachable!("No error scope registered, so validation errors will panic")
@@ -119,22 +119,87 @@ impl App {
                 } else {
                     error!("Surface lost, but window does not exist");
                 }
-                return;
             }
+        }
+        None
+    }
+
+    fn render(&mut self) {
+        let Some(window) = self.window.as_ref() else {
+            warn!("Trying to render, but the window has not been created yet");
+            return;
+        };
+        let Some(video_texture_view) = self.video_texture_view.get() else {
+            warn!("Trying to render, but the video texture view is not yet set");
+            return;
+        };
+        let video_texture_id = *self.video_texture_id.get_or_insert_with(|| {
+            self.egui_renderer.register_native_texture(
+                &self.device.wgpu_device(),
+                video_texture_view,
+                wgpu::FilterMode::Linear,
+            )
+        });
+        let egui_winit = self.egui_winit.as_mut().unwrap();
+        let raw_input = egui_winit.take_egui_input(window);
+        let egui_ctx = egui_winit.egui_ctx();
+        let full_output = egui_ctx.run_ui(raw_input, |ui| {
+            let video_texture = video_texture_view.texture();
+            let video_texture_image = egui::ImageSource::Texture(egui::load::SizedTexture {
+                id: video_texture_id,
+                size: egui::Vec2::new(video_texture.width() as _, video_texture.height() as _),
+            });
+            ui.image(video_texture_image);
+        });
+        let device = self.device.wgpu_device();
+        let queue = self.device.wgpu_queue();
+        for (id, delta) in &full_output.textures_delta.set {
+            self.egui_renderer
+                .update_texture(&device, &queue, *id, delta);
+        }
+        let paint_jobs = egui_ctx.tessellate(full_output.shapes, full_output.pixels_per_point);
+
+        debug!("Rendering");
+        let Some(surface_texture) = self.get_current_surface_texture() else {
+            return;
         };
         let surface_texture_view = surface_texture
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
         debug!("Copying texture to surface");
-        let device = self.device.wgpu_device();
-        let queue = self.device.wgpu_queue();
         let mut encoder = device.create_command_encoder(&Default::default());
-        self.blitter.copy(
+        let window = self.window.as_ref().unwrap();
+        let window_size = window.inner_size();
+        let screen_descriptor = egui_wgpu::ScreenDescriptor {
+            size_in_pixels: [window_size.width, window_size.height],
+            pixels_per_point: window.scale_factor() as _,
+        };
+        self.egui_renderer.update_buffers(
             &device,
+            &queue,
             &mut encoder,
-            video_texture_view,
-            &surface_texture_view,
+            &paint_jobs,
+            &screen_descriptor,
         );
+        {
+            let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &surface_texture_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            self.egui_renderer.render(
+                &mut render_pass.forget_lifetime(),
+                &paint_jobs,
+                &screen_descriptor,
+            );
+        }
         queue.submit([encoder.finish()]);
         self.window.as_ref().unwrap().pre_present_notify();
         debug!("Presenting");
@@ -190,6 +255,14 @@ impl App {
     }
 }
 
+impl Drop for App {
+    fn drop(&mut self) {
+        if let Some(video_texture_id) = self.video_texture_id.take() {
+            self.egui_renderer.free_texture(&video_texture_id);
+        }
+    }
+}
+
 impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         info!("Application resumed");
@@ -202,8 +275,17 @@ impl ApplicationHandler<UserEvent> for App {
         self.out_window.set(Arc::downgrade(&window)).unwrap();
         self.window = Some(window.clone());
         info!("Created window");
-        self.surface = Some(self.instance.create_surface(window).unwrap());
+        self.surface = Some(self.instance.create_surface(window.clone()).unwrap());
         info!("Created surface");
+        self.egui_winit = Some(egui_winit::State::new(
+            egui::Context::default(),
+            egui::ViewportId::ROOT,
+            &window.display_handle().unwrap(),
+            None,
+            None,
+            None,
+        ));
+        info!("Created egui_winit state");
     }
 
     fn window_event(
