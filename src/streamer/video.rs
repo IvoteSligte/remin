@@ -3,7 +3,7 @@ use fps_ticker::Fps;
 use log::{debug, error, info};
 use netnet::UnreliableSender;
 use std::sync::{Arc, mpsc};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::task::JoinHandle;
 
 use crate::common::{H264, TimeStamp, since};
@@ -11,6 +11,15 @@ use crate::common::{H264, TimeStamp, since};
 // TODO: UI element for adjusting these parameters
 // TODO: resolution downscaling and frame rate reduction according to the client's monitor
 pub(crate) const FRAME_RATE: u32 = 60;
+
+/// Number of bits in a megabyte
+const MB_BITS: u64 = 8 << 20;
+
+pub(crate) const RATE_CONTROL: avec::RateControl = avec::RateControl::VariableBitrate {
+    average_bitrate: MB_BITS / 2,
+    max_bitrate: 4 * MB_BITS,
+    virtual_buffer_size: Duration::from_secs(1),
+};
 
 pub(crate) fn send_nal_units(
     connection: &mut UnreliableSender,
@@ -93,8 +102,16 @@ pub(crate) fn start_stream(
             janck::Format::Rgba8 => avec::Format::Rgba8,
             _ => unimplemented!(),
         };
-        let mut encoder =
-            avec::Encoder::new(&device, width, height, stride, format, FRAME_RATE).unwrap();
+        let mut encoder = avec::Encoder::new(
+            &device,
+            width,
+            height,
+            stride,
+            format,
+            FRAME_RATE,
+            RATE_CONTROL,
+        )
+        .unwrap();
         let mut fps = Fps::default();
 
         // TODO: if janck can capture directly into [wgpu::Texture]s then the entire GPU upload step of encoding can be skipped
