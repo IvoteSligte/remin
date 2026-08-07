@@ -19,3 +19,6 @@
 [submodule "adieu"]
 	path = adieu
 	url = ./adieu
+[submodule "remup"]
+	path = remup
+	url = ./remup
