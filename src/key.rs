@@ -1,6 +1,15 @@
+use std::collections::HashSet;
+
 use enigo::Key as Enigo;
 use wincode::{SchemaRead, SchemaWrite};
 use winit::keyboard::KeyCode as Winit;
+
+pub fn should_ignore_press(keys_pressed: &HashSet<Key>, key: Key) -> bool {
+    keys_pressed.contains(&key)
+        || keys_pressed.contains(&Key::Alt)
+        || keys_pressed.contains(&Key::Meta)
+        || matches!(key, Key::F10 | Key::F11 | Key::F12)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SchemaRead, SchemaWrite)]
 pub enum Key {

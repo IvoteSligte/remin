@@ -7,13 +7,20 @@ use log::{debug, error, info, warn};
 use wgpu::rwh::HasDisplayHandle;
 use winit::{
     application::ApplicationHandler,
-    event::{DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
+    event::{
+        DeviceEvent, DeviceId, ElementState, KeyEvent, MouseButton, MouseScrollDelta, RawKeyEvent,
+        WindowEvent,
+    },
     event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop, EventLoopProxy},
-    keyboard::{ModifiersKeyState, PhysicalKey},
+    keyboard::PhysicalKey,
     window::{CursorGrabMode, Fullscreen, Window, WindowId},
 };
 
-use crate::{Role, common::Input, key::Key};
+use crate::{
+    Role,
+    common::Input,
+    key::{Key, should_ignore_press},
+};
 
 enum UserEvent {
     ScheduledOnInput,
@@ -30,8 +37,8 @@ struct App {
     video_texture_view: Arc<OnceLock<wgpu::TextureView>>,
     video_texture_id: Option<egui::TextureId>,
     event_loop_proxy: Arc<EventLoopProxy<UserEvent>>,
+    is_focused: bool,
     role: Role,
-    ignore_key_press: bool,
     input: Input,
     on_input: Box<dyn FnMut(&Input)>,
     /// True if an on_input event has been scheduled using [UserEvent::ScheduledOnInput].
@@ -64,12 +71,11 @@ impl App {
             out_window,
             surface: None,
             egui_winit: None,
-            // TODO: mipmaps for downscaling
             video_texture_view,
             video_texture_id: None,
             event_loop_proxy: Arc::new(event_loop_proxy),
+            is_focused: false,
             role,
-            ignore_key_press: false,
             input: Input::default(),
             on_input: Box::new(on_input),
             on_input_scheduled: false,
@@ -225,7 +231,8 @@ impl App {
         on_input(&self.input);
     }
 
-    fn on_focus(&self) {
+    fn on_focus(&mut self) {
+        self.is_focused = true;
         if self.role == Role::Watcher {
             let window = self.window.clone().unwrap();
             if !std::env::var("SHOW_CURSOR").is_ok() {
@@ -247,7 +254,8 @@ impl App {
         }
     }
 
-    fn on_unfocus(&self) {
+    fn on_unfocus(&mut self) {
+        self.is_focused = false;
         let window = self.window.as_ref().unwrap();
         if self.role == Role::Watcher {
             window.set_cursor_grab(CursorGrabMode::None).unwrap();
@@ -311,49 +319,6 @@ impl ApplicationHandler<UserEvent> for App {
                 true => self.on_focus(),
                 false => self.on_unfocus(),
             },
-            WindowEvent::KeyboardInput { event, .. } => {
-                if event.repeat {
-                    return;
-                }
-                let PhysicalKey::Code(key_code) = event.physical_key else {
-                    warn!("Unidentified key: {:?}", event.physical_key);
-                    return;
-                };
-                let Ok(key) = Key::try_from(key_code) else {
-                    warn!("Unknown key: {:?}", key_code);
-                    return;
-                };
-                if key == Key::F11 {
-                    if event.state == ElementState::Pressed {
-                        if let Some(window) = self.window.as_ref() {
-                            match window.fullscreen() {
-                                Some(_) => window.set_fullscreen(None),
-                                None => window.set_fullscreen(Some(Fullscreen::Borderless(None))),
-                            }
-                        }
-                    }
-                    return;
-                }
-                match event.state {
-                    ElementState::Pressed => {
-                        if self.ignore_key_press {
-                            return;
-                        }
-                        self.input.keys_pressed.insert(key);
-                    }
-                    ElementState::Released => {
-                        self.input.keys_pressed.remove(&key);
-                    }
-                }
-                self.on_input()
-            }
-            WindowEvent::ModifiersChanged(modifiers) => {
-                self.ignore_key_press = modifiers.lalt_state() == ModifiersKeyState::Pressed
-                    || modifiers.ralt_state() == ModifiersKeyState::Pressed
-                    || modifiers.lsuper_state() == ModifiersKeyState::Pressed
-                    || modifiers.rsuper_state() == ModifiersKeyState::Pressed;
-            }
-            // TODO: calibrate scroll amounts (currently arbitrarily chosen)
             WindowEvent::MouseWheel { delta, .. } => {
                 match delta {
                     MouseScrollDelta::LineDelta(lines_x, lines_y) => {
@@ -366,6 +331,25 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                 }
                 self.on_input()
+            }
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        repeat: false,
+                        state: ElementState::Pressed,
+                        logical_key: winit::keyboard::Key::Named(key),
+                        ..
+                    },
+                ..
+            } => {
+                if key == winit::keyboard::NamedKey::F11 {
+                    if let Some(window) = self.window.as_ref() {
+                        match window.fullscreen() {
+                            Some(_) => window.set_fullscreen(None),
+                            None => window.set_fullscreen(Some(Fullscreen::Borderless(None))),
+                        }
+                    }
+                }
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 match button {
@@ -392,7 +376,9 @@ impl ApplicationHandler<UserEvent> for App {
         let Some(window) = self.window.as_ref() else {
             return;
         };
-        // TODO: buffer MouseMotion events as they are emitted incredibly often
+        if !self.is_focused {
+            return;
+        }
         match event {
             DeviceEvent::MouseMotion { delta } => {
                 let size = window.inner_size();
@@ -405,6 +391,31 @@ impl ApplicationHandler<UserEvent> for App {
                         let _ = proxy.send_event(UserEvent::ScheduledOnInput);
                     });
                 }
+            }
+            DeviceEvent::Key(RawKeyEvent {
+                physical_key,
+                state,
+            }) => {
+                let PhysicalKey::Code(key_code) = physical_key else {
+                    warn!("Unidentified key: '{:?}'", physical_key);
+                    return;
+                };
+                let Ok(key) = Key::try_from(key_code) else {
+                    warn!("Unknown key: '{:?}'", key_code);
+                    return;
+                };
+                match state {
+                    ElementState::Pressed => {
+                        if should_ignore_press(&self.input.keys_pressed, key) {
+                            return;
+                        }
+                        self.input.keys_pressed.insert(key);
+                    }
+                    ElementState::Released => {
+                        self.input.keys_pressed.remove(&key);
+                    }
+                }
+                self.on_input()
             }
             _ => {}
         }

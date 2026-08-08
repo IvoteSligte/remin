@@ -3,7 +3,7 @@ use log::{debug, info, trace};
 use netnet::UnreliableReceiver;
 use tokio::task::JoinHandle;
 
-use crate::common::Input;
+use crate::{common::Input, key::should_ignore_press};
 
 pub(crate) fn direction_from_pressed(pressed: bool) -> enigo::Direction {
     match pressed {
@@ -35,6 +35,9 @@ pub fn start_processor(
                 enigo.key(enigo_key, enigo::Direction::Release).unwrap();
             }
             for &key in just_pressed {
+                if should_ignore_press(&input.keys_pressed, key) {
+                    continue;
+                }
                 let enigo_key = key.into();
                 debug!("Pressed key {:?}", enigo_key);
                 enigo.key(enigo_key, enigo::Direction::Press).unwrap();
