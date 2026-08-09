@@ -1,15 +1,27 @@
+use std::collections::HashSet;
+
 use enigo::{Enigo, Keyboard, Mouse};
 use log::{debug, info, trace};
 use netnet::UnreliableReceiver;
 use tokio::task::JoinHandle;
 
-use crate::{common::Input, key::should_ignore_press};
+use crate::{
+    common::Input,
+    key::{Key, should_ignore_press},
+};
 
 pub(crate) fn direction_from_pressed(pressed: bool) -> enigo::Direction {
     match pressed {
         true => enigo::Direction::Press,
         false => enigo::Direction::Release,
     }
+}
+
+fn enigo_to_upper(mut key: enigo::Key) -> enigo::Key {
+    if let enigo::Key::Unicode(c) = &mut key {
+        *c = c.to_ascii_uppercase();
+    }
+    key
 }
 
 pub fn start_processor(
@@ -23,6 +35,7 @@ pub fn start_processor(
 
     let handle = tokio::task::spawn(async move {
         let mut prev_input = Input::default();
+        let mut keys_pressed_upper = HashSet::new();
 
         loop {
             let bytes = connection.recv().await.unwrap();
@@ -32,14 +45,33 @@ pub fn start_processor(
             for &key in just_released {
                 let enigo_key = key.into();
                 debug!("Released key {:?}", enigo_key);
-                enigo.key(enigo_key, enigo::Direction::Release).unwrap();
+                if keys_pressed_upper.remove(&key) {
+                    enigo
+                        .key(enigo_to_upper(enigo_key), enigo::Direction::Release)
+                        .unwrap();
+                } else {
+                    enigo.key(enigo_key, enigo::Direction::Release).unwrap();
+                }
             }
             for &key in just_pressed {
-                dbg!(&input.keys_pressed);
+                println!("[before] keys pressed: {:?}", &input.keys_pressed);
                 if should_ignore_press(&input.keys_pressed, key) {
                     continue;
                 }
-                let enigo_key = key.into();
+                println!("[after] keys pressed: {:?}", &input.keys_pressed);
+                let mut enigo_key = key.into();
+                if input.keys_pressed.contains(&Key::Shift) {
+                    enigo_key = enigo_to_upper(enigo_key);
+                    keys_pressed_upper.insert(key);
+                }
+                println!(
+                    "[enigo] keys pressed: {:?}",
+                    &input
+                        .keys_pressed
+                        .iter()
+                        .map(|key| enigo::Key::from(*key))
+                        .collect::<Vec<_>>()
+                );
                 debug!("Pressed key {:?}", enigo_key);
                 enigo.key(enigo_key, enigo::Direction::Press).unwrap();
             }
