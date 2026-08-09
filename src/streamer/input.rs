@@ -35,6 +35,7 @@ pub fn start_processor(
                 enigo.key(enigo_key, enigo::Direction::Release).unwrap();
             }
             for &key in just_pressed {
+                dbg!(&input.keys_pressed);
                 if should_ignore_press(&input.keys_pressed, key) {
                     continue;
                 }

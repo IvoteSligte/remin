@@ -7,10 +7,7 @@ use log::{debug, error, info, warn};
 use wgpu::rwh::HasDisplayHandle;
 use winit::{
     application::ApplicationHandler,
-    event::{
-        DeviceEvent, DeviceId, ElementState, KeyEvent, MouseButton, MouseScrollDelta, RawKeyEvent,
-        WindowEvent,
-    },
+    event::{DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop, EventLoopProxy},
     keyboard::PhysicalKey,
     window::{CursorGrabMode, Fullscreen, Window, WindowId},
@@ -332,24 +329,40 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 self.on_input()
             }
-            WindowEvent::KeyboardInput {
-                event:
-                    KeyEvent {
-                        repeat: false,
-                        state: ElementState::Pressed,
-                        logical_key: winit::keyboard::Key::Named(key),
-                        ..
-                    },
-                ..
-            } => {
-                if key == winit::keyboard::NamedKey::F11 {
+            WindowEvent::KeyboardInput { event, .. } => {
+                let PhysicalKey::Code(key_code) = event.physical_key else {
+                    warn!("Unidentified key: '{:?}'", event.physical_key);
+                    return;
+                };
+                let Ok(key) = Key::try_from(key_code) else {
+                    warn!("Unknown key: '{:?}'", key_code);
+                    return;
+                };
+                if key == Key::F11 {
                     if let Some(window) = self.window.as_ref() {
                         match window.fullscreen() {
                             Some(_) => window.set_fullscreen(None),
                             None => window.set_fullscreen(Some(Fullscreen::Borderless(None))),
                         }
                     }
+                    return;
                 }
+                match event.state {
+                    ElementState::Pressed => {
+                        if self.input.keys_pressed.contains(&key)
+                            || should_ignore_press(&self.input.keys_pressed, key)
+                        {
+                            return;
+                        }
+                        self.input.keys_pressed.insert(key);
+                        debug!("Pressed key: {:?}", key);
+                    }
+                    ElementState::Released => {
+                        self.input.keys_pressed.remove(&key);
+                        debug!("Released key: {:?}", key);
+                    }
+                }
+                self.on_input()
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 match button {
@@ -391,31 +404,6 @@ impl ApplicationHandler<UserEvent> for App {
                         let _ = proxy.send_event(UserEvent::ScheduledOnInput);
                     });
                 }
-            }
-            DeviceEvent::Key(RawKeyEvent {
-                physical_key,
-                state,
-            }) => {
-                let PhysicalKey::Code(key_code) = physical_key else {
-                    warn!("Unidentified key: '{:?}'", physical_key);
-                    return;
-                };
-                let Ok(key) = Key::try_from(key_code) else {
-                    warn!("Unknown key: '{:?}'", key_code);
-                    return;
-                };
-                match state {
-                    ElementState::Pressed => {
-                        if should_ignore_press(&self.input.keys_pressed, key) {
-                            return;
-                        }
-                        self.input.keys_pressed.insert(key);
-                    }
-                    ElementState::Released => {
-                        self.input.keys_pressed.remove(&key);
-                    }
-                }
-                self.on_input()
             }
             _ => {}
         }

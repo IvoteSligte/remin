@@ -5,12 +5,12 @@ use wincode::{SchemaRead, SchemaWrite};
 use winit::keyboard::KeyCode as Winit;
 
 pub fn should_ignore_press(keys_pressed: &HashSet<Key>, key: Key) -> bool {
-    keys_pressed.contains(&key)
-        || keys_pressed.contains(&Key::Alt)
+    keys_pressed.contains(&Key::Alt)
         || keys_pressed.contains(&Key::Meta)
         || matches!(key, Key::F10 | Key::F11 | Key::F12)
 }
 
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SchemaRead, SchemaWrite)]
 pub enum Key {
     Num0,
@@ -53,8 +53,7 @@ pub enum Key {
     Alt,
     Backspace,
     CapsLock,
-    LeftControl,
-    RightControl,
+    Control,
     Decimal,
     Delete,
     Divide,
@@ -103,8 +102,7 @@ pub enum Key {
     PageUp,
     Return,
     RightArrow,
-    LeftShift,
-    RightShift,
+    Shift,
     Space,
     Subtract,
     Tab,
@@ -124,8 +122,7 @@ impl TryFrom<Winit> for Key {
             Winit::Backspace => Key::Backspace,
             Winit::CapsLock => Key::CapsLock,
             Winit::SuperLeft | Winit::SuperRight | Winit::Meta => Key::Meta,
-            Winit::ControlLeft => Key::LeftControl,
-            Winit::ControlRight => Key::RightControl,
+            Winit::ControlLeft | Winit::ControlRight => Key::Control,
             Winit::NumpadDecimal => Key::Decimal,
             Winit::Delete => Key::Delete,
             Winit::NumpadDivide => Key::Divide,
@@ -201,8 +198,7 @@ impl TryFrom<Winit> for Key {
             Winit::PageUp => Key::PageUp,
             Winit::Enter => Key::Return,
             Winit::ArrowRight => Key::RightArrow,
-            Winit::ShiftLeft => Key::LeftShift,
-            Winit::ShiftRight => Key::RightShift,
+            Winit::ShiftLeft | Winit::ShiftRight => Key::Shift,
             Winit::Space => Key::Space,
             Winit::NumpadSubtract => Key::Subtract,
             Winit::Tab => Key::Tab,
@@ -258,8 +254,7 @@ impl From<Key> for Enigo {
             Key::Alt => Enigo::Alt,
             Key::Backspace => Enigo::Backspace,
             Key::CapsLock => Enigo::CapsLock,
-            Key::LeftControl => Enigo::LControl,
-            Key::RightControl => Enigo::RControl,
+            Key::Control => Enigo::Control,
             Key::Decimal => Enigo::Decimal,
             Key::Delete => Enigo::Delete,
             Key::Divide => Enigo::Divide,
@@ -308,8 +303,7 @@ impl From<Key> for Enigo {
             Key::PageUp => Enigo::PageUp,
             Key::Return => Enigo::Return,
             Key::RightArrow => Enigo::RightArrow,
-            Key::LeftShift => Enigo::LShift,
-            Key::RightShift => Enigo::RShift,
+            Key::Shift => Enigo::Shift,
             Key::Space => Enigo::Space,
             Key::Subtract => Enigo::Subtract,
             Key::Tab => Enigo::Tab,
