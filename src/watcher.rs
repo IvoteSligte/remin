@@ -30,6 +30,8 @@ pub async fn start(
         out_window.clone(),
         video_texture_view.clone(),
     );
+    // FIXME: audio running on Windows prevents the watcher from sending input
+    //        maybe Windows hijacks the main thread for audio?
     let _audio_result_future = audio::start_processor(streams.audio.receiver);
     // This is a blocking call because the event loop *must* run on the main thread
     run_event_loop(
