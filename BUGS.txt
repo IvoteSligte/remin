@@ -1,0 +1,12 @@
+1. While streaming Linux (streamer+host) -> Windows (watcher+client):
+
+Context: During a Discord call, the audio output on the Windows user's end changed, likely invalidating the Windows audio graph.
+
+```
+thread 'tokio-rt-worker' (13200) panicked at src/watcher/audio.rs:119:43:
+called Result::unwrap() on an Err value: The stream configuration is no longer valid and must be rebuilt.
+note: run with RUST_BACKTRACE=1 environment variable to display a backtrace
+ WARN netnet::unreliable: Receiver channel closed
+
+thread 'tokio-rt-worker' (13200) panicked at src/watcher/video.rs:29:54:
+```
