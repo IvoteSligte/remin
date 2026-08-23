@@ -150,6 +150,7 @@ impl App {
             let video_texture = video_texture_view.texture();
             let video_width = video_texture.width();
             let video_height = video_texture.height();
+            // FIXME: texture is not scaled to fit the screen
             let video_texture_image = egui::ImageSource::Texture(egui::load::SizedTexture {
                 id: video_texture_id,
                 size: egui::Vec2::new(video_width as _, video_height as _),
