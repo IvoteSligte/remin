@@ -2,7 +2,7 @@ use log::error;
 use netnet::Connection;
 use std::sync::{Arc, OnceLock};
 
-use crate::{Role, net::Streams};
+use crate::net::Streams;
 use event_loop::run_event_loop;
 
 mod audio;
@@ -39,7 +39,6 @@ pub async fn start(
         device,
         out_window,
         video_texture_view,
-        Role::Watcher,
         move |input| {
             let bytes = wincode::serialize(&input).unwrap();
             streams.input.sender.send(&bytes).unwrap();

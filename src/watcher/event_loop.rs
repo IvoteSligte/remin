@@ -14,7 +14,6 @@ use winit::{
 };
 
 use crate::{
-    Role,
     common::Input,
     key::{Key, should_ignore_press},
 };
@@ -35,7 +34,6 @@ struct App {
     video_texture_id: Option<egui::TextureId>,
     event_loop_proxy: Arc<EventLoopProxy<UserEvent>>,
     is_focused: bool,
-    role: Role,
     input: Input,
     on_input: Box<dyn FnMut(&Input)>,
     /// True if an on_input event has been scheduled using [UserEvent::ScheduledOnInput].
@@ -53,7 +51,6 @@ impl App {
         out_window: Arc<OnceLock<Weak<Window>>>,
         video_texture_view: Arc<OnceLock<wgpu::TextureView>>,
         event_loop_proxy: EventLoopProxy<UserEvent>,
-        role: Role,
         on_input: impl FnMut(&Input) + 'static,
     ) -> Self {
         Self {
@@ -72,7 +69,6 @@ impl App {
             video_texture_id: None,
             event_loop_proxy: Arc::new(event_loop_proxy),
             is_focused: false,
-            role,
             input: Input::default(),
             on_input: Box::new(on_input),
             on_input_scheduled: false,
@@ -127,50 +123,25 @@ impl App {
         None
     }
 
-    fn render(&mut self) {
-        let Some(window) = self.window.as_ref() else {
-            warn!("Trying to render, but the window has not been created yet");
-            return;
-        };
-        let Some(video_texture_view) = self.video_texture_view.get() else {
-            warn!("Trying to render, but the video texture view is not yet set");
-            return;
-        };
-        let video_texture_id = *self.video_texture_id.get_or_insert_with(|| {
-            self.egui_renderer.register_native_texture(
-                &self.device.wgpu_device(),
-                video_texture_view,
-                wgpu::FilterMode::Linear,
-            )
-        });
-        let egui_winit = self.egui_winit.as_mut().unwrap();
-        let raw_input = egui_winit.take_egui_input(window);
-        let egui_ctx = egui_winit.egui_ctx();
-        let full_output = egui_ctx.run_ui(raw_input, |ui| {
-            let video_texture = video_texture_view.texture();
-            let video_width = video_texture.width();
-            let video_height = video_texture.height();
-            // NOTE: is the texture scaled to fit the screen? (when source resolution < screen resolution)
-            let video_texture_image = egui::ImageSource::Texture(egui::load::SizedTexture {
-                id: video_texture_id,
-                size: egui::Vec2::new(video_width as _, video_height as _),
-            });
-            ui.centered_and_justified(|ui| {
-                ui.add(
-                    egui::Image::new(video_texture_image)
-                        .maintain_aspect_ratio(true)
-                        .fit_to_exact_size(ui.content_rect().size())
-                        .max_size(ui.content_rect().size()),
-                )
-            });
-        });
+    fn egui_ctx(&mut self) -> &egui::Context {
+        let egui_winit = self.egui_winit.as_ref().unwrap();
+        egui_winit.egui_ctx()
+    }
+
+    /// General boilerplate for rendering egui output to a window.
+    fn render_to_window(&mut self, full_output: egui::FullOutput) {
+        debug_assert!(self.window.is_some());
+        debug_assert!(self.egui_winit.is_some());
+
         let device = self.device.wgpu_device();
         let queue = self.device.wgpu_queue();
         for (id, delta) in &full_output.textures_delta.set {
             self.egui_renderer
                 .update_texture(&device, &queue, *id, delta);
         }
-        let paint_jobs = egui_ctx.tessellate(full_output.shapes, full_output.pixels_per_point);
+        let paint_jobs = self
+            .egui_ctx()
+            .tessellate(full_output.shapes, full_output.pixels_per_point);
 
         debug!("Rendering");
         let Some(surface_texture) = self.get_current_surface_texture() else {
@@ -219,6 +190,52 @@ impl App {
         surface_texture.present();
     }
 
+    fn render(&mut self) {
+        if self.window.is_none() {
+            warn!("Trying to render, but the window has not been created yet");
+            return;
+        }
+        let Some((video_texture_id, video_texture_width, video_texture_height)) =
+            self.get_video_texture()
+        else {
+            warn!("Trying to render, but the video texture view is not set yet");
+            return;
+        };
+        let egui_winit = self.egui_winit.as_mut().unwrap();
+        let raw_input = egui_winit.take_egui_input(self.window.as_ref().unwrap());
+        let full_output = self.egui_ctx().run_ui(raw_input, |ui| {
+            let video_texture_image = {
+                // NOTE: is the texture scaled to fit the screen? (when source resolution < screen resolution)
+                egui::ImageSource::Texture(egui::load::SizedTexture {
+                    id: video_texture_id,
+                    size: egui::Vec2::new(video_texture_width as _, video_texture_height as _),
+                })
+            };
+            ui.centered_and_justified(|ui| {
+                ui.add(
+                    egui::Image::new(video_texture_image)
+                        .maintain_aspect_ratio(true)
+                        .fit_to_exact_size(ui.content_rect().size())
+                        .max_size(ui.content_rect().size()),
+                )
+            });
+        });
+        self.render_to_window(full_output);
+    }
+
+    fn get_video_texture(&mut self) -> Option<(egui::TextureId, u32, u32)> {
+        let texture_view = self.video_texture_view.get()?;
+        let texture_id = *self.video_texture_id.get_or_insert_with(|| {
+            self.egui_renderer.register_native_texture(
+                &self.device.wgpu_device(),
+                texture_view,
+                wgpu::FilterMode::Linear,
+            )
+        });
+        let texture = texture_view.texture();
+        Some((texture_id, texture.width(), texture.height()))
+    }
+
     // Callbacks are only called if the window exists, with the exception of on_exit
 
     fn on_resize(&self) {
@@ -232,34 +249,30 @@ impl App {
 
     fn on_focus(&mut self) {
         self.is_focused = true;
-        if self.role == Role::Watcher {
-            let window = self.window.clone().unwrap();
-            if !std::env::var("SHOW_CURSOR").is_ok() {
-                window.set_cursor_visible(false);
-                info!("Made cursor invisible");
-            }
-            // Wait a short while so that other cursor-based inputs can be performed,
-            // otherwise, on Windows, the top-bar buttons cannot be pressed.
-            tokio::task::spawn(async move {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-                info!("Trying to confine cursor to window");
-                if let Err(err) = window.set_cursor_grab(CursorGrabMode::Confined) {
-                    warn!("Failed to confine cursor to window: {err}");
-                    if let Err(err) = window.set_cursor_grab(CursorGrabMode::Locked) {
-                        warn!("Failed to lock cursor to window (fallback): {err}");
-                    };
-                };
-            });
+        let window = self.window.clone().unwrap();
+        if !std::env::var("SHOW_CURSOR").is_ok() {
+            window.set_cursor_visible(false);
+            info!("Made cursor invisible");
         }
+        // Wait a short while so that other cursor-based inputs can be performed,
+        // otherwise, on Windows, the top-bar buttons cannot be pressed.
+        tokio::task::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            info!("Trying to confine cursor to window");
+            if let Err(err) = window.set_cursor_grab(CursorGrabMode::Confined) {
+                warn!("Failed to confine cursor to window: {err}");
+                if let Err(err) = window.set_cursor_grab(CursorGrabMode::Locked) {
+                    warn!("Failed to lock cursor to window (fallback): {err}");
+                };
+            };
+        });
     }
 
     fn on_unfocus(&mut self) {
         self.is_focused = false;
         let window = self.window.as_ref().unwrap();
-        if self.role == Role::Watcher {
-            window.set_cursor_grab(CursorGrabMode::None).unwrap();
-            window.set_cursor_visible(true);
-        }
+        window.set_cursor_grab(CursorGrabMode::None).unwrap();
+        window.set_cursor_visible(true);
     }
 
     fn on_exit(&mut self) {
@@ -424,7 +437,6 @@ pub fn run_event_loop(
     device: Arc<avec::Device>,
     out_window: Arc<OnceLock<Weak<Window>>>,
     video_texture_view: Arc<OnceLock<wgpu::TextureView>>,
-    role: Role,
     on_input: impl FnMut(&Input) + Send + 'static,
 ) {
     let event_loop = EventLoop::with_user_event().build().unwrap();
@@ -436,7 +448,6 @@ pub fn run_event_loop(
         out_window,
         video_texture_view,
         event_loop.create_proxy(),
-        role,
         on_input,
     );
     event_loop.run_app(&mut app).unwrap();
