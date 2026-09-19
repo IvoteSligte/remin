@@ -22,3 +22,6 @@
 [submodule "remup"]
 	path = remup
 	url = ./remup
+[submodule "wrapp"]
+	path = wrapp
+	url = ./wrapp
