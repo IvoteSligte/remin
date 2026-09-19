@@ -17,8 +17,7 @@ tracing = { version = "0.1.44", features = ["log-always"] }
 chrono = "0.4.45"
 clap = { version = "4.6.4", features = ["derive"] }
 winit = "0.30.13"
-# Using the Git because the latest crates.io version relies on outdated CMake.
-opus = { git = "https://github.com/SpaceManiac/opus-rs.git" }
+opus = "0.4.0"
 rtrb = "0.3.4"
 
 # TODO: use git paths once janck and netnet are stable
