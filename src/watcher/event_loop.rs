@@ -204,6 +204,7 @@ impl App {
     // Callbacks are only called if the window exists, with the exception of on_exit
 
     fn on_input(&mut self) {
+        debug!("Calling input callback");
         let Self { on_input, .. } = self;
         on_input(&self.input);
     }
