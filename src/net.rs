@@ -77,9 +77,9 @@ pub fn host_server() -> anyhow::Result<impl Future<Output = anyhow::Result<(Conn
         info!("Client connected");
         let streams = Streams {
             control: conn.create_reliable_stream(CONTROL_STREAM_ID).await?.into(),
-            input: conn.create_unreliable_stream(INPUT_STREAM_ID).await?.into(),
-            video: conn.create_unreliable_stream(VIDEO_STREAM_ID).await?.into(),
-            audio: conn.create_unreliable_stream(AUDIO_STREAM_ID).await?.into(),
+            input: conn.create_unreliable_stream(INPUT_STREAM_ID, "input").await?.into(),
+            video: conn.create_unreliable_stream(VIDEO_STREAM_ID, "video").await?.into(),
+            audio: conn.create_unreliable_stream(AUDIO_STREAM_ID, "audio").await?.into(),
         };
         Ok((conn, streams))
     })
