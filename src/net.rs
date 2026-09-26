@@ -6,11 +6,6 @@ use netnet::Connection;
 
 use crate::{Role, common::HOST_PORT};
 
-pub const CONTROL_STREAM_ID: u8 = 1;
-pub const INPUT_STREAM_ID: u8 = 2;
-pub const VIDEO_STREAM_ID: u8 = 3;
-pub const AUDIO_STREAM_ID: u8 = 4;
-
 // TODO: stop client/host video streams when F12 is pressed
 // TODO: stop host input TCP stream when F12 is pressed
 
@@ -76,10 +71,10 @@ pub fn host_server() -> anyhow::Result<impl Future<Output = anyhow::Result<(Conn
         let mut conn = future.await?;
         info!("Client connected");
         let streams = Streams {
-            control: conn.create_reliable_stream(CONTROL_STREAM_ID).await?.into(),
-            input: conn.create_unreliable_stream(INPUT_STREAM_ID, "input").await?.into(),
-            video: conn.create_unreliable_stream(VIDEO_STREAM_ID, "video").await?.into(),
-            audio: conn.create_unreliable_stream(AUDIO_STREAM_ID, "audio").await?.into(),
+            control: conn.create_reliable_stream("control").await?.into(),
+            input: conn.create_unreliable_stream("input").await?.into(),
+            video: conn.create_unreliable_stream("video").await?.into(),
+            audio: conn.create_unreliable_stream("audio").await?.into(),
         };
         Ok((conn, streams))
     })
@@ -96,8 +91,8 @@ pub fn connect_to_server(
         let mut conn = future.await?;
         info!("Connected to server");
 
-        let (stream_id, sender, receiver) = conn.accept_reliable_stream().await?;
-        if stream_id != CONTROL_STREAM_ID {
+        let (sender, receiver) = conn.accept_reliable_stream().await?;
+        if sender.label() != "control" {
             bail!("Somehow accepted reliable non-control stream");
         }
         let control = ReliableStream { sender, receiver };
@@ -106,13 +101,16 @@ pub fn connect_to_server(
         let mut video = None;
         let mut audio = None;
         for _ in 0..3 {
-            let (stream_id, sender, receiver) = conn.accept_unreliable_stream().await?;
-            match stream_id {
-                INPUT_STREAM_ID => input = Some(UnreliableStream { sender, receiver }),
-                VIDEO_STREAM_ID => video = Some(UnreliableStream { sender, receiver }),
-                AUDIO_STREAM_ID => audio = Some(UnreliableStream { sender, receiver }),
+            let (sender, receiver) = conn.accept_unreliable_stream().await?;
+            match sender.label() {
+                "input" => input = Some(UnreliableStream { sender, receiver }),
+                "video" => video = Some(UnreliableStream { sender, receiver }),
+                "audio" => audio = Some(UnreliableStream { sender, receiver }),
                 _ => {
-                    bail!("Somehow accepted unreliable stream that is neither audio nor video")
+                    panic!(
+                        "Accepted unreliable stream that is neither input, audio, nor video. Label: '{}'",
+                        sender.label()
+                    )
                 }
             }
         }
