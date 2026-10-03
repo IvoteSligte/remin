@@ -1,6 +1,6 @@
 use log::{debug, error, info};
 use netnet::UnreliableSender;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::common::{Opus, TimeStamp, since};
 
@@ -61,6 +61,9 @@ pub(crate) fn start_stream(mut sender: UnreliableSender) -> anyhow::Result<()> {
     let mut buffer_ints = Vec::new();
     let mut encode_buffer = vec![0u8; 4000];
 
+    // TODO: add GUI volume control slider so that the watcher can control the stream's volume
+
+    // FIXME: on Windows, adieu::capture_audio hijacks the calling thread
     let result = adieu::capture_audio(Some("remin-audio-capture"), move |chunk, info| {
         let adieu::ChunkInfo {
             channels: num_channels,
@@ -121,5 +124,9 @@ pub(crate) fn start_stream(mut sender: UnreliableSender) -> anyhow::Result<()> {
         return Err(err.into());
     }
     info!("Started audio stream");
+    // Block the current thread, since it should only exit when something fails.
+    // TODO: Remove when the adieu::capture_audio band-aid fix is replaced with a proper fix.
+    //       (and make the tokio::select not include audio::start_stream then, as before git commit a28f406)
+    std::thread::sleep(Duration::MAX);
     Ok(())
 }

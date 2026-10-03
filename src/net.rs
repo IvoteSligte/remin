@@ -93,7 +93,10 @@ pub fn connect_to_server(
 
         let (sender, receiver) = conn.accept_reliable_stream().await?;
         if sender.label() != "control" {
-            bail!("Somehow accepted reliable non-control stream '{:?}'", sender.label());
+            bail!(
+                "Somehow accepted reliable non-control stream '{:?}'",
+                sender.label()
+            );
         }
         let control = ReliableStream { sender, receiver };
 
