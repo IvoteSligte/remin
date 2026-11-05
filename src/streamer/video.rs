@@ -18,7 +18,7 @@ const MB_BITS: u64 = 8 << 20;
 
 // NOTE: This is experimental. Previously set to VariableBitrate with max of 4 MB and avg of 0.5 MB
 pub(crate) const RATE_CONTROL: avec::RateControl = avec::RateControl::ConstantBitrate {
-    bitrate: MB_BITS,
+    bitrate: 10 * MB_BITS,
     virtual_buffer_size: Duration::from_secs(1),
 };
 
