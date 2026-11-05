@@ -69,17 +69,18 @@ pub(crate) struct ScreenCapture {
 
 pub(crate) fn capture_screen() -> anyhow::Result<ScreenCapture> {
     let (frame_sender, frame_receiver) = mpsc::sync_channel(0);
-    let mut video = janck::capture_video(FRAME_RATE as _)?;
-    let first_frame = video
-        .next()
-        .context("Failed to capture first frame of video")?;
 
     std::thread::spawn(move || {
+        let video = janck::capture_video(FRAME_RATE as _).unwrap();
         // Using a separate thread allows a frame to be captured while another one is being processed
         for frame in video {
             frame_sender.send((frame, TimeStamp::now())).unwrap();
         }
     });
+    let (first_frame, _) = frame_receiver
+        .recv()
+        .context("Failed to capture first frame of video")?;
+
     Ok(ScreenCapture {
         info: first_frame.info,
         video: frame_receiver,
