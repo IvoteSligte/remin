@@ -18,7 +18,17 @@ pub fn start_processor(
     screen_height: u32,
 ) -> anyhow::Result<JoinHandle<anyhow::Result<()>>> {
     info!("Starting input handler");
-    let mut enigo = Enigo::new(&enigo::Settings::default())?;
+    let mut enigo = Enigo::new(&enigo::Settings {
+        // Set to true because Enigo otherwise always uses absolute move movements,
+        // which break mouse movements in games in many cases, since they rely on
+        // raw input (i.e. relative movement).
+        //
+        // TODO: Automatically normalize mouse speed by multiplying by the reciprocal
+        // of the Windows mouse speed setting AND/OR add GUI setting for the watcher
+        // to multiply simulated mouse speed by.
+        windows_subject_to_mouse_speed_and_acceleration_level: true,
+        ..Default::default()
+    })?;
     info!("Created virtual keyboard and mouse");
 
     let handle = tokio::task::spawn(async move {
