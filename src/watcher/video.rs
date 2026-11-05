@@ -63,7 +63,7 @@ pub fn start_processor(
             let timestamp = TimeStamp::from_raw(timestamp);
             debug!("Received frame ({:.2}ms latency)", timestamp.since());
             let decoder = decoder.get_or_insert_with(|| {
-                let decoder = avec::Decoder::new(device.clone(), width, height).unwrap();
+                let decoder = avec::Decoder::new(device.clone(), (width, height)).unwrap();
                 out_video_texture_view
                     .set(decoder.output_texture_view().clone())
                     .unwrap();

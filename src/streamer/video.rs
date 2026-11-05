@@ -9,8 +9,9 @@ use tokio::task::JoinHandle;
 use crate::common::{H264, TimeStamp, since};
 
 // TODO: UI element for adjusting these parameters
-// TODO: resolution downscaling and frame rate reduction according to the client's monitor
+// TODO: automatic resolution downscaling and frame rate reduction according to the client's monitor
 pub(crate) const FRAME_RATE: u32 = 60;
+pub(crate) const DIMENSIONS: (u32, u32) = (1920, 1080);
 
 /// Number of bits in a megabyte
 const MB_BITS: u64 = 8 << 20;
@@ -104,9 +105,9 @@ pub(crate) fn start_stream(
         };
         let mut encoder = avec::Encoder::new(
             &device,
-            width,
-            height,
+            (width, height),
             stride,
+            DIMENSIONS,
             format,
             FRAME_RATE,
             RATE_CONTROL,
@@ -132,8 +133,8 @@ pub(crate) fn start_stream(
                 &mut sender,
                 &encoded.data,
                 encoded.is_keyframe,
-                width,
-                height,
+                DIMENSIONS.0,
+                DIMENSIONS.1,
                 timestamp,
             )
             .unwrap();
