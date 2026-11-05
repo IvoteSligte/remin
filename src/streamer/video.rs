@@ -16,9 +16,9 @@ pub(crate) const DIMENSIONS: (u32, u32) = (1920, 1080);
 /// Number of bits in a megabyte
 const MB_BITS: u64 = 8 << 20;
 
-pub(crate) const RATE_CONTROL: avec::RateControl = avec::RateControl::VariableBitrate {
-    average_bitrate: MB_BITS / 2,
-    max_bitrate: 4 * MB_BITS,
+// NOTE: This is experimental. Previously set to VariableBitrate with max of 4 MB and avg of 0.5 MB
+pub(crate) const RATE_CONTROL: avec::RateControl = avec::RateControl::ConstantBitrate {
+    bitrate: MB_BITS,
     virtual_buffer_size: Duration::from_secs(1),
 };
 
