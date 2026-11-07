@@ -63,8 +63,8 @@ pub(crate) fn send_nal_units(
 }
 
 pub(crate) struct ScreenCapture {
-    pub(crate) video: mpsc::Receiver<(janck::Frame, TimeStamp)>,
     pub(crate) info: janck::FrameInfo,
+    pub(crate) video: mpsc::Receiver<(Result<janck::Frame, janck::Error>, TimeStamp)>,
 }
 
 pub(crate) fn capture_screen() -> anyhow::Result<ScreenCapture> {
@@ -82,7 +82,7 @@ pub(crate) fn capture_screen() -> anyhow::Result<ScreenCapture> {
         .context("Failed to capture first frame of video")?;
 
     Ok(ScreenCapture {
-        info: first_frame.info,
+        info: first_frame?.info,
         video: frame_receiver,
     })
 }
@@ -117,7 +117,8 @@ pub(crate) fn start_stream(
         let mut fps = Fps::default();
 
         // TODO: if janck can capture directly into [wgpu::Texture]s then the entire GPU upload step of encoding can be skipped
-        for (janck::Frame { bytes, info, .. }, timestamp) in screen_capture.video {
+        for (frame_result, timestamp) in screen_capture.video {
+            let janck::Frame { bytes, info, .. } = frame_result.unwrap();
             assert_eq!(info, screen_capture.info); // TODO: handle screen resizing and such
             // Encode frame to H.264
             let pre_encode = Instant::now();
