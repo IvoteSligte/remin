@@ -20,13 +20,16 @@ winit = "0.30.13"
 opus = "0.4.0"
 rtrb = "0.3.4"
 
-# TODO: use git paths once janck and netnet are stable
+# TODO: use git paths once these crates are stable
 janck = { path = "./janck" }
 netnet = { path = "./netnet" }
 avec = { path = "./avec" }
-fps_ticker = { path = "./fps_ticker" }
 adieu = { path = "./adieu" }
 wrapp = { path = "./wrapp" }
+capenc = { path = "./capenc" }
+
+# Patched to support multi-threading
+fps_ticker = { path = "./fps_ticker" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 cpal = { path = "../cpal", features = ["pipewire", "realtime-dbus"] }

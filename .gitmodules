@@ -25,3 +25,9 @@
 [submodule "wrapp"]
 	path = wrapp
 	url = ./wrapp
+[submodule "capenc"]
+	path = capenc
+	url = ./capenc
+[submodule "wenc"]
+	path = wenc
+	url = ./wenc

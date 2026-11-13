@@ -35,7 +35,7 @@ dependencies = [
  "log",
  "pipewire",
  "sysinfo",
- "thiserror 2.0.19",
+ "thiserror 2.0.21",
  "wasapi",
  "windows",
  "windows-result",
@@ -107,7 +107,7 @@ dependencies = [
  "ndk-context",
  "ndk-sys",
  "num_enum",
- "thiserror 2.0.19",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -241,7 +241,7 @@ dependencies = [
  "nom 7.1.3",
  "num-traits",
  "rusticata-macros",
- "thiserror 2.0.19",
+ "thiserror 2.0.21",
  "time",
 ]
 
@@ -311,10 +311,9 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 name = "avec"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "gpu-video",
  "log",
- "thiserror 2.0.19",
+ "thiserror 2.0.21",
  "wgpu",
 ]
 
@@ -455,6 +454,19 @@ dependencies = [
  "rustix 0.38.44",
  "wayland-backend",
  "wayland-client",
+]
+
+[[package]]
+name = "capenc"
+version = "0.1.0"
+dependencies = [
+ "avec",
+ "fps_ticker",
+ "janck",
+ "log",
+ "thiserror 2.0.21",
+ "wenc",
+ "windows-capture",
 ]
 
 [[package]]
@@ -765,6 +777,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-deque"
+version = "0.8.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "622f3fc73690be383c7214310406f28a90e6edeadc3cea882f9d71e495b9711a"
+dependencies = [
+ "crossbeam-epoch",
+ "crossbeam-utils",
+]
+
+[[package]]
+name = "crossbeam-epoch"
+version = "0.9.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc74980687109a3b14c72fd458107bf0baa1da1a1a805e178d15501ba9b86d9d"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "crossbeam-queue"
 version = "0.3.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -978,7 +1009,7 @@ dependencies = [
  "epaint",
  "log",
  "profiling",
- "thiserror 2.0.19",
+ "thiserror 2.0.21",
  "type-map",
  "web-time",
  "wgpu",
@@ -1330,7 +1361,7 @@ dependencies = [
  "hashbrown 0.16.1",
  "log",
  "presser",
- "thiserror 2.0.19",
+ "thiserror 2.0.21",
  "windows",
 ]
 
@@ -1544,11 +1575,9 @@ dependencies = [
  "libc",
  "log",
  "memmap2",
- "thiserror 2.0.19",
+ "thiserror 2.0.21",
  "wayland-client",
  "wayland-protocols-wlr",
- "wgc",
- "windows",
 ]
 
 [[package]]
@@ -1563,7 +1592,7 @@ dependencies = [
  "jni-sys 0.4.1",
  "log",
  "simd_cesu8",
- "thiserror 2.0.19",
+ "thiserror 2.0.21",
  "walkdir",
  "windows-link",
 ]
@@ -1770,9 +1799,9 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.33"
+version = "0.4.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
+checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
 name = "lru-slab"
@@ -1873,7 +1902,7 @@ dependencies = [
  "once_cell",
  "rustc-hash 1.1.0",
  "spirv",
- "thiserror 2.0.19",
+ "thiserror 2.0.21",
  "unicode-ident",
 ]
 
@@ -1920,7 +1949,7 @@ dependencies = [
  "quinn",
  "rcgen",
  "rustls",
- "thiserror 2.0.19",
+ "thiserror 2.0.21",
  "tokio",
 ]
 
@@ -2720,7 +2749,7 @@ dependencies = [
  "rustc-hash 2.1.3",
  "rustls",
  "socket2",
- "thiserror 2.0.19",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "web-time",
@@ -2744,7 +2773,7 @@ dependencies = [
  "rustls-pki-types",
  "rustls-platform-verifier",
  "slab",
- "thiserror 2.0.19",
+ "thiserror 2.0.21",
  "tinyvec",
  "tracing",
  "web-time",
@@ -2836,6 +2865,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "rayon"
+version = "1.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb39b166781f92d482534ef4b4b1b2568f42613b53e5b6c160e24cfbfa30926d"
+dependencies = [
+ "either",
+ "rayon-core",
+]
+
+[[package]]
+name = "rayon-core"
+version = "1.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
+dependencies = [
+ "crossbeam-deque",
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "rcgen"
 version = "0.14.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2922,6 +2971,7 @@ dependencies = [
  "adieu",
  "anyhow",
  "avec",
+ "capenc",
  "chrono",
  "clap",
  "cpal",
@@ -3305,17 +3355,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
-name = "smart-default"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0eb01866308440fc64d6c44d9e86c5cc17adfe33c4d6eed55da9145044d0ffc1"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "smithay-client-toolkit"
 version = "0.19.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3503,11 +3542,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.19"
+version = "2.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09a43598840e33d5b0331f38c5e30d13bb11c11210a4b58f0d9b18a5a5eefcd9"
+checksum = "09e52cb86a36cede5cb101bf8908837b3e4c6e5e59fe7fd85c23fb56200d189e"
 dependencies = [
- "thiserror-impl 2.0.19",
+ "thiserror-impl 2.0.21",
 ]
 
 [[package]]
@@ -3523,9 +3562,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.19"
+version = "2.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43cbfe0cf76104d42a574802844187e84a305e531ed54455f11fbde0f10541cd"
+checksum = "fe5197923287db20a58125f0bc85c062f7f2c892de97b18c356f9efb14b28524"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3825,7 +3864,7 @@ dependencies = [
  "log",
  "peniko",
  "smallvec",
- "thiserror 2.0.19",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -3879,7 +3918,7 @@ checksum = "80c3aa5d6b0e7acc3ea10cb19c334df0c8d825060f14a30d9e3b03385e6e5175"
 dependencies = [
  "log",
  "num-integer",
- "thiserror 2.0.19",
+ "thiserror 2.0.21",
  "windows",
  "windows-core",
 ]
@@ -4106,16 +4145,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "wgc"
-version = "3.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57d052895336f308a8974a90d91c8436ba2dc4c0597e2e90415acfe0a01a43c7"
+name = "wenc"
+version = "0.1.0"
 dependencies = [
- "smart-default",
- "thiserror 2.0.19",
- "tracing",
+ "thiserror 2.0.21",
  "windows",
- "windows-future",
 ]
 
 [[package]]
@@ -4172,7 +4206,7 @@ dependencies = [
  "raw-window-handle",
  "rustc-hash 1.1.0",
  "smallvec",
- "thiserror 2.0.19",
+ "thiserror 2.0.21",
  "wgpu-core-deps-apple",
  "wgpu-core-deps-emscripten",
  "wgpu-core-deps-wasm",
@@ -4261,7 +4295,7 @@ dependencies = [
  "raw-window-metal",
  "renderdoc-sys",
  "smallvec",
- "thiserror 2.0.19",
+ "thiserror 2.0.21",
  "wasm-bindgen",
  "wayland-sys",
  "web-sys",
@@ -4336,7 +4370,7 @@ dependencies = [
  "pastey",
  "proc-macro2",
  "quote",
- "thiserror 2.0.19",
+ "thiserror 2.0.21",
  "wincode-derive",
 ]
 
@@ -4362,6 +4396,19 @@ dependencies = [
  "windows-core",
  "windows-future",
  "windows-numerics",
+]
+
+[[package]]
+name = "windows-capture"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09046acbe9b6d039cde50e8c8178d95bb0f9b33ed7feccc4465dadc5404b31b4"
+dependencies = [
+ "parking_lot",
+ "rayon",
+ "thiserror 2.0.21",
+ "windows",
+ "windows-future",
 ]
 
 [[package]]
@@ -4695,7 +4742,7 @@ dependencies = [
  "oid-registry",
  "ring",
  "rusticata-macros",
- "thiserror 2.0.19",
+ "thiserror 2.0.21",
  "time",
 ]
 
