@@ -21,15 +21,11 @@ opus = "0.4.0"
 rtrb = "0.3.4"
 
 # TODO: use git paths once these crates are stable
-janck = { path = "./janck" }
 netnet = { path = "./netnet" }
-avec = { path = "./avec" }
 adieu = { path = "./adieu" }
 wrapp = { path = "./wrapp" }
 capenc = { path = "./capenc" }
-
-# Patched to support multi-threading
-fps_ticker = { path = "./fps_ticker" }
+fps_ticker = { git = "https://github.com/IvoteSligte/fps_ticker.git", version = "1.0.0" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 cpal = { path = "../cpal", features = ["pipewire", "realtime-dbus"] }

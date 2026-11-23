@@ -31,3 +31,6 @@
 [submodule "wenc"]
 	path = wenc
 	url = ./wenc
+[submodule "duvet"]
+	path = duvet
+	url = ./duvet
