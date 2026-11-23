@@ -1,4 +1,4 @@
-use log::error;
+use log::{error, info};
 use netnet::Connection;
 use std::sync::{Arc, OnceLock};
 
@@ -10,12 +10,9 @@ mod event_loop;
 mod video;
 
 /// This function *must* be called from the main thread
-pub async fn start(
-    instance: Arc<avec::Instance>,
-    device: Arc<avec::Device>,
-    conn: Connection,
-    mut streams: Streams,
-) -> anyhow::Result<()> {
+pub async fn start(conn: Connection, mut streams: Streams) -> anyhow::Result<()> {
+    info!("Initializing backend");
+    let (instance, device) = avec::init()?;
     let out_window = Arc::new(OnceLock::new());
     let video_texture_view = Arc::new(OnceLock::new());
 

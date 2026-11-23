@@ -2,7 +2,7 @@ use log::{debug, error, info};
 use netnet::UnreliableSender;
 use std::time::{Duration, Instant};
 
-use crate::common::{Opus, TimeStamp, since};
+use crate::common::{Opus, since};
 
 fn send_encoded(
     sender: &mut UnreliableSender,
@@ -16,7 +16,6 @@ fn send_encoded(
         sample_rate,
         is_stereo: num_channels == 2,
         bytes: encoded,
-        timestamp: TimeStamp::now().raw(),
     })
     .unwrap();
     *chunk_id += 1;

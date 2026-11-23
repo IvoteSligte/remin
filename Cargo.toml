@@ -14,7 +14,6 @@ wgpu = "29.0.0"
 tokio = { version = "1.52.4", default-features = false, features = ["macros", "rt", "rt-multi-thread"] }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 tracing = { version = "0.1.44", features = ["log-always"] }
-chrono = "0.4.45"
 clap = { version = "4.6.4", features = ["derive"] }
 winit = "0.30.13"
 opus = "0.4.0"
@@ -25,6 +24,7 @@ netnet = { path = "./netnet" }
 adieu = { path = "./adieu" }
 wrapp = { path = "./wrapp" }
 capenc = { path = "./capenc" }
+avec = { path = "./avec" }
 fps_ticker = { git = "https://github.com/IvoteSligte/fps_ticker.git", version = "1.0.0" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -32,16 +32,6 @@ cpal = { path = "../cpal", features = ["pipewire", "realtime-dbus"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 cpal = { path = "../cpal", features = ["asio"] }
-
-# always use release profile for janck
-# settings from https://doc.rust-lang.org/cargo/reference/profiles.html#release
-[profile.dev.package.janck]
-opt-level = 3
-strip = "none"
-debug-assertions = false
-overflow-checks = false
-incremental = false
-codegen-units = 16
 
 [patch.crates-io]
 # patch that makes vk-mem (dependency of gpu-video) statically link libstdc++ on Windows

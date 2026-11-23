@@ -8,7 +8,7 @@ use log::{debug, error, info, trace, warn};
 use netnet::UnreliableReceiver;
 use winit::window::Window;
 
-use crate::common::{H264, TimeStamp, since};
+use crate::common::{H264, since};
 
 // This is deliberately not an `async` function, despite returning a [Future],
 // because `async` functions only start processing when `await`ed,
@@ -32,8 +32,6 @@ pub fn start_processor(
                 height,
                 bytes,
                 is_keyframe_start,
-                // NOTE: timestamp is not accurate on remote devices as the internal clocks are not synchronized
-                timestamp,
             } = wincode::deserialize(packet_bytes).unwrap();
             let instant = Instant::now();
             let mut guard = frame_buffer.lock().unwrap();
@@ -41,7 +39,7 @@ pub fn start_processor(
                 // Once a keyframe has arrived, processing older frames only adds unnecessary latency
                 guard.clear();
             }
-            guard.push_back((width, height, bytes.to_vec(), timestamp, instant));
+            guard.push_back((width, height, bytes.to_vec(), instant));
         }
     });
     let mut decoder = None;
@@ -50,7 +48,7 @@ pub fn start_processor(
         let mut last_frame_instant = Instant::now();
 
         loop {
-            let (width, height, bytes, timestamp, instant) =
+            let (width, height, bytes, instant) =
                 match frame_buffer2.lock().map(|mut guard| guard.pop_front()) {
                     Ok(Some(frame)) => frame,
                     Ok(None) => continue,
@@ -60,8 +58,6 @@ pub fn start_processor(
                     }
                 };
             trace!("Channel latency: {}ms", since(instant));
-            let timestamp = TimeStamp::from_raw(timestamp);
-            debug!("Received frame ({:.2}ms latency)", timestamp.since());
             let decoder = decoder.get_or_insert_with(|| {
                 let decoder = avec::Decoder::new(device.clone(), (width, height)).unwrap();
                 out_video_texture_view
@@ -80,9 +76,8 @@ pub fn start_processor(
             }
             frames_per_second.tick();
             debug!(
-                "Decoding frame took {:.2}ms ({:.2}ms latency, {:.2}/s, {:.2}ms since last)",
+                "Decoding frame took {:.2}ms ({:.2}/s, {:.2}ms since last)",
                 since(pre_decode),
-                timestamp.since(),
                 frames_per_second.avg(),
                 since(last_frame_instant)
             );

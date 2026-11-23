@@ -5,7 +5,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use log::{debug, error, warn};
 use netnet::UnreliableReceiver;
 
-use crate::common::{Opus, TimeStamp, since};
+use crate::common::{Opus, since};
 
 struct AudioPlayback {
     writer: rtrb::Producer<i16>,
@@ -109,8 +109,6 @@ pub fn start_processor(
                 sample_rate,
                 is_stereo,
                 bytes,
-                // NOTE: timestamp is not accurate on remote devices as the internal clocks are not synchronized
-                timestamp,
             } = wincode::deserialize(packet_bytes).unwrap();
             if last_chunk_id + 1 < chunk_id {
                 warn!(
@@ -119,7 +117,6 @@ pub fn start_processor(
                     chunk_id - 1
                 );
             }
-            let _timestamp = TimeStamp::from_raw(timestamp);
             let (channels, num_channels) = match is_stereo {
                 false => (opus::Channels::Mono, 1),
                 true => (opus::Channels::Stereo, 2),

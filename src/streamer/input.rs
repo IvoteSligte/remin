@@ -14,8 +14,7 @@ pub(crate) fn direction_from_pressed(pressed: bool) -> enigo::Direction {
 
 pub fn start_processor(
     mut connection: UnreliableReceiver,
-    screen_width: u32,
-    screen_height: u32,
+    (screen_width, screen_height): (u32, u32),
 ) -> anyhow::Result<JoinHandle<anyhow::Result<()>>> {
     info!("Starting input handler");
     let mut enigo = Enigo::new(&enigo::Settings {

@@ -1,7 +1,4 @@
-use std::{
-    net::{IpAddr, SocketAddr},
-    sync::Arc,
-};
+use std::net::{IpAddr, SocketAddr};
 
 use clap::{Parser, ValueEnum};
 use common::HOST_PORT;
@@ -10,6 +7,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod common;
 mod key;
+mod nal;
 mod net;
 mod streamer;
 mod watcher;
@@ -36,30 +34,20 @@ enum Role {
     Watcher,
 }
 
-fn run_host(
-    instance: Arc<avec::Instance>,
-    device: Arc<avec::Device>,
-    role: Role,
-) -> anyhow::Result<impl Future<Output = anyhow::Result<()>>> {
-    let device = device.clone();
+fn run_host(role: Role) -> anyhow::Result<impl Future<Output = anyhow::Result<()>>> {
     let future = net::host_server()?;
-
     Ok(async move {
         let (conn, mut streams) = future.await?;
         streams.send_role(role).await?;
         info!("Connected");
         match role {
-            Role::Streamer => streamer::start(device, conn, streams).await,
-            Role::Watcher => watcher::start(instance, device, conn, streams).await,
+            Role::Streamer => streamer::start(conn, streams).await,
+            Role::Watcher => watcher::start(conn, streams).await,
         }
     })
 }
 
-fn run_client(
-    instance: Arc<avec::Instance>,
-    device: Arc<avec::Device>,
-    host_ip: IpAddr,
-) -> anyhow::Result<impl Future<Output = anyhow::Result<()>>> {
+fn run_client(host_ip: IpAddr) -> anyhow::Result<impl Future<Output = anyhow::Result<()>>> {
     let host_addr = SocketAddr::new(host_ip, HOST_PORT);
     let future = net::connect_to_server(host_addr)?;
 
@@ -74,8 +62,8 @@ fn run_client(
         info!("Running event loop");
         match role {
             // TODO: show error message from start (if any) to user
-            Role::Streamer => streamer::start(device, conn, streams).await,
-            Role::Watcher => watcher::start(instance, device, conn, streams).await,
+            Role::Streamer => streamer::start(conn, streams).await,
+            Role::Watcher => watcher::start(conn, streams).await,
         }
     })
 }
@@ -103,17 +91,14 @@ fn main() -> anyhow::Result<()> {
     tokio::runtime::Runtime::new()
         .unwrap()
         .block_on(async move {
-            info!("Initializing backend");
-            let (instance, device) = avec::init()?;
-
             let result = match args.host_ip {
                 Some(host_ip) => {
                     info!("Running client");
-                    run_client(instance, device, host_ip)?.await
+                    run_client(host_ip)?.await
                 }
                 None => {
                     info!("No host IP specified; hosting");
-                    run_host(instance, device, args.role.unwrap())?.await
+                    run_host(args.role.unwrap())?.await
                 }
             };
             info!("Program finished");
